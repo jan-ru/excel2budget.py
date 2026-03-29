@@ -157,6 +157,38 @@ All 159 tests should pass. The test suite includes:
 - Property-based tests validating correctness properties (unpivot row counts, DC split, SQL safety, round-trip fidelity, XSS sanitization, etc.)
 - Unit tests for Excel importing and memory safety
 
+### Code Coverage
+
+```bash
+# Run tests with coverage report
+.venv/bin/python -m pytest --cov=src --cov-report=term-missing -q
+```
+
+| Module | Stmts | Miss | Cover |
+|---|---|---|---|
+| src/core/memory.py | 49 | 3 | 94% |
+| src/core/types.py | 241 | 0 | 100% |
+| src/core/validation.py | 46 | 0 | 100% |
+| src/documentation/control_table.py | 9 | 2 | 78% |
+| src/documentation/description_generator.py | 57 | 0 | 100% |
+| src/documentation/diagram_generator.py | 48 | 7 | 85% |
+| src/documentation/module.py | 21 | 0 | 100% |
+| src/documentation/user_instruction.py | 23 | 0 | 100% |
+| src/engine/duckdb/engine.py | 77 | 8 | 90% |
+| src/engine/ironcalc/engine.py | 185 | 156 | 16% |
+| src/engine/ironcalc/sanitizer.py | 25 | 0 | 100% |
+| src/export/exporter.py | 41 | 5 | 88% |
+| src/export/pdf_exporter.py | 36 | 0 | 100% |
+| src/modules/excel2budget/context_builder.py | 78 | 10 | 87% |
+| src/modules/excel2budget/importer.py | 111 | 4 | 96% |
+| src/modules/excel2budget/pipeline.py | 100 | 20 | 80% |
+| src/modules/excel2budget/sql_generator.py | 56 | 5 | 91% |
+| src/templates/registry.py | 34 | 10 | 71% |
+| src/ui/app.py | 201 | 22 | 89% |
+| **TOTAL** | **1444** | **252** | **83%** |
+
+Note: `src/engine/ironcalc/engine.py` has low coverage (16%) because IronCalc WASM requires a native binary that is not exercised in the pure-Python test environment. The sanitizer and all other modules are well covered.
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.
