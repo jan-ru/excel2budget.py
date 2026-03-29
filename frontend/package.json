@@ -15,7 +15,7 @@
     "@duckdb/duckdb-wasm": "^1.29.0",
     "@ui5/webcomponents": "^2.7.0",
     "@ui5/webcomponents-fiori": "^2.7.0",
-    "jspdf": "^2.5.2",
+    "jspdf": "^4.2.1",
     "@ironcalc/wasm": "^0.7.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
