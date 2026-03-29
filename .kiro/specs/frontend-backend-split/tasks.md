@@ -350,6 +350,75 @@ Split the monolithic Python data conversion tool into a FastAPI backend (Python)
 - [x] 22. Final checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
+- [x] 23. Backend Settings module (12-Factor: Config)
+  - [x] 23.1 Create `backend/app/settings.py` with Pydantic `BaseSettings`
+    - Define `Settings` class with fields: `host` (str, default `0.0.0.0`), `port` (int, default `8000`), `log_level` (str, default `info`), `duckdb_path` (str, default `data/config.duckdb`)
+    - Use `pydantic-settings` package (`BaseSettings` with `model_config` for env var mapping)
+    - Implement `get_settings()` with `@lru_cache` for singleton access
+    - Invalid values (e.g. `PORT=abc`) must raise `ValidationError` at startup
+    - Add `pydantic-settings`, `python-json-logger`, and `prometheus-fastapi-instrumentator` to `backend/pyproject.toml` dependencies
+    - _Requirements: 19.1, 19.2, 6.6_
+
+  - [x] 23.2 Write property test: Environment Configuration Validation (Property 19)
+    - **Property 19: Environment Configuration Validation**
+    - For any valid env var combination (HOST=non-empty string, PORT=valid int, LOG_LEVEL=debug|info|warning|error, DUCKDB_PATH=non-empty string), Settings produces matching config object
+    - When env vars are absent, Settings uses documented defaults (HOST=0.0.0.0, PORT=8000, LOG_LEVEL=info, DUCKDB_PATH=data/config.duckdb)
+    - When PORT is set to a non-integer value, Settings raises a validation error
+    - Clear `get_settings` lru_cache between test runs
+    - Use Hypothesis with `@settings(max_examples=100)`
+    - **Validates: Requirements 19.1, 19.2, 6.6**
+
+- [x] 24. Backend Structured Logging module (12-Factor: Logs)
+  - [x] 24.1 Create `backend/app/logging_config.py` with JSON structured logging
+    - Use `python-json-logger` library (`pythonjsonlogger.json.JsonFormatter`)
+    - Configure formatter with fields: `timestamp` (ISO 8601), `level`, `module`, `message`
+    - Implement `setup_logging(log_level: str)` that configures root logger with `StreamHandler(sys.stdout)` and `JsonFormatter`
+    - Clear existing handlers before adding new one
+    - Set root logger level from `log_level` parameter (uppercased)
+    - _Requirements: 19.18, 19.19, 19.20_
+
+  - [x] 24.2 Write property test: Structured Log Format (Property 20)
+    - **Property 20: Structured Log Format**
+    - For any log message emitted, output is valid JSON containing: `timestamp` (ISO 8601), `level` (matching log level), `module` (non-empty string), `message` (the logged text)
+    - When LOG_LEVEL is set to higher severity (e.g. "warning"), lower severity entries (e.g. "info") are not emitted
+    - Use Hypothesis with `@settings(max_examples=100)`
+    - **Validates: Requirements 19.18, 19.19, 19.20**
+
+- [x] 25. Backend Lifespan handler and port binding (12-Factor: Disposability, Port Binding)
+  - [x] 25.1 Update `backend/app/main.py` with async lifespan context manager
+    - Add `@asynccontextmanager async def lifespan(app: FastAPI)` that:
+      - On startup: calls `get_settings()`, calls `setup_logging(settings.log_level)`, creates `ConfigStore(db_path=settings.duckdb_path)` and stores on `app.state.config_store`
+      - On shutdown: calls `app.state.config_store.close()` to release DuckDB connection
+    - Pass `lifespan=lifespan` to `FastAPI()` constructor
+    - Add `Instrumentator().instrument(app).expose(app, endpoint="/metrics")` for Prometheus metrics via `prometheus-fastapi-instrumentator`
+    - Update configuration router to read `config_store` from `request.app.state.config_store` instead of creating its own instance
+    - _Requirements: 19.13, 19.14, 6.7, 19.23, 19.24, 19.25_
+
+  - [x] 25.2 Create `backend/run.py` uvicorn entry point
+    - Import `get_settings` from `backend.app.settings`
+    - Read `host`, `port`, `log_level` from Settings
+    - Call `uvicorn.run("backend.app.main:app", host=..., port=..., log_level=...)`
+    - Ensure it works as `python backend/run.py` or `python -m backend.run`
+    - _Requirements: 19.10, 19.11, 19.6_
+
+- [x] 26. Update Config_Store for Settings integration and graceful shutdown
+  - [x] 26.1 Update `backend/app/persistence/config_store.py`
+    - Ensure `ConfigStore.__init__` accepts `db_path` parameter (already does, but verify it's used by lifespan handler via Settings)
+    - Add `close()` method that calls `self._conn.close()` to release the DuckDB connection
+    - Ensure ConfigStore treats the DuckDB file as a backing service — only the path couples it
+    - _Requirements: 6.6, 6.7, 19.13_
+
+- [x] 27. Update existing tests for Settings/lifespan compatibility
+  - [x] 27.1 Update backend test fixtures and configuration router tests
+    - Ensure test fixtures create `ConfigStore` with a temporary db path (not relying on env vars)
+    - Update any tests that instantiate `FastAPI` app to work with the new lifespan handler
+    - Verify httpx `TestClient` works with lifespan-managed `config_store` on `app.state`
+    - Clear `get_settings.cache_clear()` in test setup where needed
+    - _Requirements: 19.1, 19.13_
+
+- [x] 28. Checkpoint — Ensure all 12-factor tests pass
+  - Ensure all tests pass (existing + new Settings, logging, lifespan tests), ask the user if questions arise.
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP

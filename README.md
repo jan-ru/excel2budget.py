@@ -52,8 +52,11 @@ All raw financial data (Excel cell values, transformed rows, exported files) sta
 
 ```
 ├── backend/                       # FastAPI Python backend
+│   ├── run.py                     # uvicorn entry point (port binding)
 │   ├── app/
-│   │   ├── main.py                # FastAPI entry point
+│   │   ├── main.py                # FastAPI entry point + lifespan handler
+│   │   ├── settings.py            # Pydantic BaseSettings (env config)
+│   │   ├── logging_config.py      # JSON structured logging (python-json-logger)
 │   │   ├── cli.py                 # CLI entry point (dev/ops)
 │   │   ├── core/
 │   │   │   ├── types.py           # Pydantic models (single source of truth)
@@ -128,6 +131,18 @@ A reusable, application-agnostic module that generates 7 documentation artifacts
 
 Every conversion produces a reconciliation sheet proving input totals equal output totals, ensuring no data is lost or corrupted.
 
+### 12-Factor App Compliance
+
+The backend follows the [12-factor app](https://12factor.net/) methodology:
+
+- **Config** — All runtime settings via environment variables (`HOST`, `PORT`, `LOG_LEVEL`, `DUCKDB_PATH`), managed by Pydantic `BaseSettings`
+- **Backing Services** — DuckDB file treated as an attached resource, swappable via env var
+- **Logs** — Structured JSON to stdout via `python-json-logger`, no file management
+- **Port Binding** — Self-contained HTTP service via uvicorn, no external web server required
+- **Disposability** — Async lifespan handler for fast startup and graceful shutdown (DuckDB connection release)
+- **Observability** — Prometheus metrics at `/metrics` via `prometheus-fastapi-instrumentator`
+- **Admin Processes** — CLI runs as a one-off process using the same codebase
+
 ## Development
 
 ### Prerequisites
@@ -135,6 +150,23 @@ Every conversion produces a reconciliation sheet proving input totals equal outp
 - Python 3.12+
 - Node.js 18+
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended for Python)
+
+### Environment Variables
+
+The backend reads all runtime configuration from environment variables (12-Factor: Config):
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOST` | `0.0.0.0` | Server bind address |
+| `PORT` | `8000` | Server bind port |
+| `LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warning`, `error`) |
+| `DUCKDB_PATH` | `data/config.duckdb` | Path to DuckDB persistent file |
+
+The frontend reads the backend URL at build time:
+
+| Variable | Default | Description |
+|---|---|---|
+| `VITE_API_URL` | `http://localhost:8000` | Backend API base URL |
 
 ### Backend Setup
 
@@ -164,14 +196,22 @@ npm run generate-types
 
 ```bash
 cd backend
+uv run python backend/run.py
+```
+
+Or directly with uvicorn:
+
+```bash
+cd backend
 uv run uvicorn backend.app.main:app --reload
 ```
 
 The OpenAPI spec is served at `http://localhost:8000/openapi.json`.
+Prometheus metrics are available at `http://localhost:8000/metrics`.
 
 ### Running Tests
 
-Backend (70 tests — Hypothesis property tests + integration):
+Backend (79 tests — Hypothesis property tests + integration):
 
 ```bash
 cd backend
@@ -196,6 +236,7 @@ npx vitest --run
 | `/api/configurations` | GET | List saved configurations |
 | `/api/configurations` | POST | Create a configuration |
 | `/api/configurations/{name}` | GET/PUT/DELETE | Read/update/delete a configuration |
+| `/metrics` | GET | Prometheus metrics (request count, latency, in-progress) |
 
 ### CLI
 

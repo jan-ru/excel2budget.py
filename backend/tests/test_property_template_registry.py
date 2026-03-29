@@ -7,14 +7,13 @@ OutputTemplate.
 Validates: Requirements 4.1, 4.2, 4.3
 """
 
-from hypothesis import given, settings
+import pytest
+from hypothesis import given, settings, HealthCheck
 from hypothesis import strategies as st
 from starlette.testclient import TestClient
 
 from backend.app.main import app
 from backend.app.templates.registry import _REGISTRY
-
-_client = TestClient(app)
 
 _all_packages = list(_REGISTRY.keys())
 _all_pairs = [(pkg, tpl) for pkg, templates in _REGISTRY.items() for tpl in templates]
@@ -23,40 +22,54 @@ package_strategy = st.sampled_from(_all_packages)
 pair_strategy = st.sampled_from(_all_pairs)
 
 
-@given(pkg=package_strategy)
-@settings(max_examples=20)
-def test_list_packages_includes_registered(pkg: str):
-    """list-packages always includes every registered package."""
-    resp = _client.get("/api/templates/packages")
-    assert resp.status_code == 200
-    assert pkg in resp.json()["packages"]
+@pytest.fixture()
+def client():
+    """TestClient created after conftest sets DUCKDB_PATH."""
+    with TestClient(app) as c:
+        yield c
 
 
-@given(data=pair_strategy)
-@settings(max_examples=20)
-def test_list_templates_includes_registered(data):
-    """list-templates includes the registered template."""
-    pkg, tpl = data
-    resp = _client.get(f"/api/templates/packages/{pkg}/templates")
-    assert resp.status_code == 200
-    assert tpl in resp.json()["templates"]
+class TestTemplateRegistryRoundTrip:
+    """Template registry API round-trip properties."""
 
+    @given(pkg=package_strategy)
+    @settings(
+        max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
+    def test_list_packages_includes_registered(self, pkg, client):
+        """list-packages always includes every registered package."""
+        resp = client.get("/api/templates/packages")
+        assert resp.status_code == 200
+        assert pkg in resp.json()["packages"]
 
-@given(data=pair_strategy)
-@settings(max_examples=20)
-def test_get_template_returns_matching(data):
-    """get-template returns OutputTemplate matching the registry."""
-    pkg, tpl = data
-    resp = _client.get(f"/api/templates/packages/{pkg}/templates/{tpl}")
-    assert resp.status_code == 200
-    template = resp.json()["template"]
-    assert template["packageName"] == pkg
-    assert template["templateName"] == tpl
+    @given(data=pair_strategy)
+    @settings(
+        max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
+    def test_list_templates_includes_registered(self, data, client):
+        """list-templates includes the registered template."""
+        pkg, tpl = data
+        resp = client.get(f"/api/templates/packages/{pkg}/templates")
+        assert resp.status_code == 200
+        assert tpl in resp.json()["templates"]
 
-    expected = _REGISTRY[pkg][tpl]
-    assert len(template["columns"]) == len(expected.columns)
+    @given(data=pair_strategy)
+    @settings(
+        max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
+    def test_get_template_returns_matching(self, data, client):
+        """get-template returns OutputTemplate matching the registry."""
+        pkg, tpl = data
+        resp = client.get(f"/api/templates/packages/{pkg}/templates/{tpl}")
+        assert resp.status_code == 200
+        template = resp.json()["template"]
+        assert template["packageName"] == pkg
+        assert template["templateName"] == tpl
 
-    for actual_col, expected_col in zip(template["columns"], expected.columns):
-        assert actual_col["name"] == expected_col.name
-        assert actual_col["dataType"] == expected_col.dataType.value
-        assert actual_col["nullable"] == expected_col.nullable
+        expected = _REGISTRY[pkg][tpl]
+        assert len(template["columns"]) == len(expected.columns)
+
+        for actual_col, expected_col in zip(template["columns"], expected.columns):
+            assert actual_col["name"] == expected_col.name
+            assert actual_col["dataType"] == expected_col.dataType.value
+            assert actual_col["nullable"] == expected_col.nullable

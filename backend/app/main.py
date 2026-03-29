@@ -4,18 +4,27 @@ Mounts template, documentation, and configuration routers.
 OpenAPI spec is auto-generated and served at /openapi.json by FastAPI.
 All core Pydantic models are registered in the OpenAPI schema so that
 the Type Pipeline can generate TypeScript types for the full domain.
+
+The async lifespan handler manages startup (logging, config store) and
+graceful shutdown (DuckDB connection release).  Prometheus metrics are
+auto-instrumented via prometheus-fastapi-instrumentator.
 """
 
 import inspect
+from contextlib import asynccontextmanager
 from enum import Enum
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
 from backend.app.core import api_models, types
+from backend.app.logging_config import setup_logging
+from backend.app.persistence.config_store import ConfigStore
 from backend.app.routers import configurations, documentation, templates
+from backend.app.settings import get_settings
 
 
 def _collect_models(*modules) -> list[type[BaseModel]]:
@@ -52,6 +61,27 @@ def _collect_enums(*modules) -> list[type[Enum]]:
 _all_models = _collect_models(types, api_models)
 _all_enums = _collect_enums(types)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application startup and graceful shutdown.
+
+    Startup:
+      - Read settings from environment variables
+      - Configure structured JSON logging
+      - Open DuckDB connection and store on app.state
+
+    Shutdown:
+      - Release the DuckDB connection so in-flight requests can complete
+    """
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    config_store = ConfigStore(db_path=settings.duckdb_path)
+    app.state.config_store = config_store
+    yield
+    config_store.close()
+
+
 app = FastAPI(
     title="Data Conversion Tool API",
     version="1.0.0",
@@ -59,6 +89,7 @@ app = FastAPI(
         "Backend API for the Data Conversion Tool: templates, "
         "documentation, and configuration persistence."
     ),
+    lifespan=lifespan,
 )
 
 app.include_router(
@@ -76,6 +107,8 @@ app.include_router(
     prefix="/api/configurations",
     tags=["configurations"],
 )
+
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 
 def custom_openapi() -> dict[str, Any]:

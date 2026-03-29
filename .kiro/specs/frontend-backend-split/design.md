@@ -43,6 +43,9 @@ graph TB
         DM["Documentation_Module"]
         CS["Config_Store<br/>(DuckDB native)"]
         CLI["CLI"]
+        ST["Settings<br/>(Pydantic BaseSettings)"]
+        LG["Logging<br/>(python-json-logger)"]
+        MT["Metrics<br/>(prometheus-fastapi-instrumentator)"]
     end
 
     UI --> PO
@@ -63,6 +66,10 @@ graph TB
     AG --> CS
     CLI --> TR
     CLI --> CS
+    ST --> AG
+    ST --> CS
+    LG --> AG
+    MT --> AG
 ```
 
 ### Data Flow
@@ -101,17 +108,34 @@ sequenceDiagram
 
 #### 1. API_Gateway (`backend/app/main.py`)
 
-The FastAPI application entry point. Mounts all routers and serves the OpenAPI spec.
+The FastAPI application entry point. Mounts all routers, serves the OpenAPI spec, and manages application lifecycle via a lifespan handler.
 
 ```python
 # backend/app/main.py
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 from backend.app.routers import templates, documentation, configurations
+from backend.app.settings import get_settings
+from backend.app.persistence.config_store import ConfigStore
+from backend.app.logging_config import setup_logging
 
-app = FastAPI(title="Data Conversion Tool API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: configure logging, open DuckDB connection
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    app.state.config_store = ConfigStore(db_path=settings.duckdb_path)
+    yield
+    # Shutdown: release DuckDB connection, allow in-flight requests to complete
+    app.state.config_store.close()
+
+app = FastAPI(title="Data Conversion Tool API", version="1.0.0", lifespan=lifespan)
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(documentation.router, prefix="/api/documentation", tags=["documentation"])
 app.include_router(configurations.router, prefix="/api/configurations", tags=["configurations"])
+
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 ```
 
 #### 2. Template Registry Router (`backend/app/routers/templates.py`)
@@ -142,12 +166,13 @@ Exposes the existing template registry over REST.
 
 #### 5. Config_Store (`backend/app/persistence/config_store.py`)
 
-DuckDB-based persistence layer for customer configurations.
+DuckDB-based persistence layer for customer configurations. Receives its database path from the `Settings` module (which reads `DUCKDB_PATH` from the environment). Treated as a backing service — swapping to a different DuckDB file requires only changing the environment variable.
 
 ```python
 class ConfigStore:
     def __init__(self, db_path: str = "data/config.duckdb"):
         self.db_path = db_path
+        self._conn = duckdb.connect(db_path)
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
@@ -159,6 +184,9 @@ class ConfigStore:
     def list_all(self) -> list[CustomerConfiguration]: ...
     def update(self, name: str, config: UpdateConfigurationRequest) -> CustomerConfiguration: ...
     def delete(self, name: str) -> bool: ...
+    def close(self) -> None:
+        """Release the DuckDB connection. Called during graceful shutdown."""
+        self._conn.close()
 ```
 
 #### 6. Documentation Module (`backend/app/documentation/`)
@@ -167,11 +195,144 @@ Direct port of the existing `src/documentation/` package. No changes to internal
 
 #### 7. CLI (`backend/app/cli.py`)
 
-Direct port of `src/cli.py`. Uses the same Pydantic core types and template registry. Remains a backend-only dev/ops tool.
+Direct port of `src/cli.py`. Uses the same Pydantic core types and template registry. Remains a backend-only dev/ops tool. Runs as a one-off admin process independently of the API_Gateway (12-Factor: Admin Processes).
+
+#### 8. Settings (`backend/app/settings.py`)
+
+Centralized configuration module using Pydantic `BaseSettings`. All runtime configuration is read from environment variables with sensible defaults. No configuration values are hardcoded in application source code (12-Factor: Config).
+
+```python
+# backend/app/settings.py
+from functools import lru_cache
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    host: str = "0.0.0.0"
+    port: int = 8000
+    log_level: str = "info"
+    duckdb_path: str = "data/config.duckdb"
+
+    model_config = {
+        "env_prefix": "",       # HOST, PORT, LOG_LEVEL, DUCKDB_PATH
+        "case_sensitive": False,
+    }
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+```
+
+Environment variable mapping:
+
+| Env Variable | Settings Field | Type | Default | Description |
+|---|---|---|---|---|
+| `HOST` | `host` | `str` | `0.0.0.0` | Server bind address |
+| `PORT` | `port` | `int` | `8000` | Server bind port |
+| `LOG_LEVEL` | `log_level` | `str` | `info` | Logging level (debug, info, warning, error) |
+| `DUCKDB_PATH` | `duckdb_path` | `str` | `data/config.duckdb` | Path to DuckDB persistent file |
+
+Invalid values (e.g. `PORT=abc`) cause a `ValidationError` at startup, preventing the application from running with bad configuration.
+
+#### 9. Logging Module (`backend/app/logging_config.py`)
+
+Configures structured JSON logging to stdout using `python-json-logger`. The application never writes to or manages log files — log routing is the responsibility of the execution environment (12-Factor: Logs).
+
+```python
+# backend/app/logging_config.py
+import logging
+import sys
+from pythonjsonlogger.json import JsonFormatter
+
+def setup_logging(log_level: str = "info") -> None:
+    formatter = JsonFormatter(
+        fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+        rename_fields={"asctime": "timestamp", "levelname": "level", "name": "module"},
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(log_level.upper())
+```
+
+Example log output:
+```json
+{"timestamp": "2025-01-15T10:30:00+0000", "level": "INFO", "module": "backend.app.main", "message": "Application started"}
+```
+
+#### 10. Metrics Module (`backend/app/main.py` — middleware)
+
+Prometheus metrics are auto-instrumented via `prometheus-fastapi-instrumentator`. The instrumentator is attached as middleware in the FastAPI app and exposes a `/metrics` endpoint. No manual metric annotations are needed on individual endpoints.
+
+```python
+# In backend/app/main.py, after app creation:
+from prometheus_fastapi_instrumentator import Instrumentator
+
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+```
+
+This provides out of the box:
+- `http_requests_total` — counter by method, path, status code
+- `http_request_duration_seconds` — histogram of request latency
+- `http_requests_in_progress` — gauge of in-flight requests
+
+#### 11. Port Binding and Server Entry Point
+
+The backend exports its HTTP service by binding directly to a port — no external web server container required (12-Factor: Port Binding). The server is started via uvicorn, reading `HOST` and `PORT` from environment variables through the `Settings` module.
+
+```python
+# backend/run.py (or __main__.py)
+import uvicorn
+from backend.app.settings import get_settings
+
+def main():
+    settings = get_settings()
+    uvicorn.run(
+        "backend.app.main:app",
+        host=settings.host,
+        port=settings.port,
+        log_level=settings.log_level,
+    )
+
+if __name__ == "__main__":
+    main()
+```
+
+### Stateless Processes (12-Factor: Processes)
+
+Backend processes are stateless. All persistent state resides in the DuckDB backing service (the persistent file at `DUCKDB_PATH`). No session state, request-scoped caches, or user data is stored in process-local memory between requests. This enables horizontal scaling — multiple uvicorn workers can serve requests concurrently, sharing only the DuckDB file.
+
+### Build, Release, Run Separation (12-Factor: Build/Release/Run)
+
+```mermaid
+graph LR
+    subgraph Build
+        B1["Backend: pip wheel / pip install ."]
+        B2["Frontend: vite build → dist/"]
+    end
+    subgraph Release
+        R1["Backend wheel + env vars"]
+        R2["Frontend dist/ + VITE_API_URL baked in"]
+    end
+    subgraph Run
+        U1["uvicorn backend.app.main:app<br/>(reads HOST, PORT, LOG_LEVEL, DUCKDB_PATH)"]
+        U2["Static file server / CDN<br/>(serves dist/)"]
+    end
+    B1 --> R1 --> U1
+    B2 --> R2 --> U2
+```
+
+| Stage | Backend | Frontend |
+|---|---|---|
+| Build | `pip install .` produces a Python wheel. No runtime config needed. | `vite build` produces static assets in `dist/`. `VITE_API_URL` is baked in at build time. |
+| Release | Combine wheel with environment-specific config (env vars). | Combine `dist/` bundle with deployment target (CDN, static server). |
+| Run | `uvicorn backend.app.main:app` — reads all config from env vars. | Serve `dist/` via any static file server or CDN. No server-side runtime. |
 
 ### Frontend Components
 
-#### 8. API_Client (`frontend/src/api/client.ts`)
+#### 11. API_Client (`frontend/src/api/client.ts`)
 
 Typed HTTP client using `fetch` and the generated TypeScript types.
 
@@ -192,7 +353,7 @@ export async function updateConfiguration(name: string, config: UpdateConfigurat
 export async function deleteConfiguration(name: string): Promise<void> { ... }
 ```
 
-#### 9. Pipeline_Orchestrator (`frontend/src/pipeline/orchestrator.ts`)
+#### 12. Pipeline_Orchestrator (`frontend/src/pipeline/orchestrator.ts`)
 
 Coordinates the full client-side flow. Holds the session state (all in-memory, ephemeral).
 
@@ -217,43 +378,43 @@ export class PipelineOrchestrator {
 }
 ```
 
-#### 10. Excel_Importer (`frontend/src/import/excel-importer.ts`)
+#### 13. Excel_Importer (`frontend/src/import/excel-importer.ts`)
 
 Client-side .xlsx parsing using SheetJS (xlsx) or ExcelJS.
 
-#### 11. SQL_Generator (`frontend/src/transform/sql-generator.ts`)
+#### 14. SQL_Generator (`frontend/src/transform/sql-generator.ts`)
 
 TypeScript port of `src/modules/excel2budget/sql_generator.py`. Generates DuckDB-compatible SELECT-only SQL.
 
-#### 12. DuckDB_WASM Engine (`frontend/src/engine/duckdb-engine.ts`)
+#### 15. DuckDB_WASM Engine (`frontend/src/engine/duckdb-engine.ts`)
 
 Wraps `@duckdb/duckdb-wasm` for in-browser SQL execution.
 
-#### 13. IronCalc_WASM Engine (`frontend/src/engine/ironcalc-engine.ts`)
+#### 16. IronCalc_WASM Engine (`frontend/src/engine/ironcalc-engine.ts`)
 
 Wraps IronCalc WASM for spreadsheet rendering and preview.
 
-#### 14. XSS_Sanitizer (`frontend/src/security/xss-sanitizer.ts`)
+#### 17. XSS_Sanitizer (`frontend/src/security/xss-sanitizer.ts`)
 
 TypeScript port of `src/engine/ironcalc/sanitizer.py`. Strips HTML tags, script elements, event handlers, dangerous URI schemes.
 
-#### 15. Data_Validator (`frontend/src/validation/data-validator.ts`)
+#### 18. Data_Validator (`frontend/src/validation/data-validator.ts`)
 
 TypeScript port of `src/core/validation.py`. Validates mapping config, user params, DC values.
 
-#### 16. CSV_Excel_Exporter (`frontend/src/export/csv-excel-exporter.ts`)
+#### 19. CSV_Excel_Exporter (`frontend/src/export/csv-excel-exporter.ts`)
 
 Client-side CSV/Excel generation. CSV via string building; Excel via SheetJS or ExcelJS.
 
-#### 17. PDF_Exporter (`frontend/src/export/pdf-exporter.ts`)
+#### 20. PDF_Exporter (`frontend/src/export/pdf-exporter.ts`)
 
 Client-side PDF generation using jsPDF or pdf-lib. Replaces the Python fpdf2-based exporter.
 
-#### 18. Memory_Guard (`frontend/src/guards/memory-guard.ts`)
+#### 21. Memory_Guard (`frontend/src/guards/memory-guard.ts`)
 
 TypeScript port of `src/core/memory.py`. Validates file size and estimated WASM memory before parsing.
 
-#### 19. UI_App (`frontend/src/ui/`)
+#### 22. UI_App (`frontend/src/ui/`)
 
 Plain TypeScript + @ui5/webcomponents. Screen-based navigation:
 
@@ -277,9 +438,12 @@ frontend/src/ui/
 ```
 backend/
 ├── pyproject.toml
+├── run.py                         # uvicorn entry point (port binding)
 ├── app/
 │   ├── __init__.py
-│   ├── main.py                    # FastAPI app entry point
+│   ├── main.py                    # FastAPI app entry point + lifespan handler
+│   ├── settings.py                # Pydantic BaseSettings (env config)
+│   ├── logging_config.py          # JSON structured logging (python-json-logger)
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── types.py               # Pydantic models (converted from dataclasses)
@@ -308,7 +472,7 @@ backend/
 │   ├── persistence/
 │   │   ├── __init__.py
 │   │   └── config_store.py        # DuckDB config persistence
-│   └── cli.py                     # CLI entry point (ported)
+│   └── cli.py                     # CLI entry point (ported, one-off admin process)
 └── tests/
     └── ...
 ```
@@ -387,6 +551,9 @@ frontend/
 | `src/export/pdf_exporter.py` | `frontend/src/export/pdf-exporter.ts` | Frontend |
 | `src/ui/app.py` | `frontend/src/ui/app.ts` + screens | Frontend |
 | `src/cli.py` | `backend/app/cli.py` | Backend |
+| (new) | `backend/app/settings.py` | Backend |
+| (new) | `backend/app/logging_config.py` | Backend |
+| (new) | `backend/run.py` | Backend |
 
 ## Data Models
 
@@ -846,6 +1013,18 @@ export interface components {
 
 **Validates: Requirements 17.1, 17.2, 17.3**
 
+### Property 19: Environment Configuration Validation
+
+*For any* combination of environment variable values for HOST (any non-empty string), PORT (any valid integer), LOG_LEVEL (one of "debug", "info", "warning", "error"), and DUCKDB_PATH (any non-empty string), the Settings model should produce a configuration object reflecting those values. When environment variables are absent, the Settings model should use the documented defaults (HOST=`0.0.0.0`, PORT=`8000`, LOG_LEVEL=`info`, DUCKDB_PATH=`data/config.duckdb`). When PORT is set to a non-integer value, the Settings model should raise a validation error at startup.
+
+**Validates: Requirements 19.1, 19.2, 6.6**
+
+### Property 20: Structured Log Format
+
+*For any* log message emitted by the backend logging module, the output should be valid JSON containing the fields: `timestamp` (ISO 8601 format), `level` (matching the log level), `module` (non-empty string), and `message` (the logged message text). When the LOG_LEVEL is set to a higher severity (e.g. "warning"), log entries at lower severity (e.g. "info") should not appear in the output.
+
+**Validates: Requirements 19.18, 19.19, 19.20**
+
 ## Error Handling
 
 ### Backend Error Handling
@@ -950,6 +1129,8 @@ Both unit tests and property-based tests are required for comprehensive coverage
 
 **Framework**: pytest + Hypothesis (property-based testing) + httpx (async test client for FastAPI)
 
+**Dependencies note**: The backend requires `pydantic-settings` for the `BaseSettings` configuration module, `python-json-logger` for structured JSON logging, and `prometheus-fastapi-instrumentator` for Prometheus metrics.
+
 **Property-based tests** (each references a design property):
 
 | Test | Property | Library |
@@ -959,6 +1140,8 @@ Both unit tests and property-based tests are required for comprehensive coverage
 | Documentation generation completeness | Property 4 | Hypothesis |
 | Configuration CRUD round-trip | Property 5 | Hypothesis |
 | API response consistency | Property 18 | Hypothesis |
+| Environment configuration validation | Property 19 | Hypothesis |
+| Structured log format | Property 20 | Hypothesis |
 | CLI argument parsing and exit codes | Property 17 | Hypothesis |
 
 Each property test must:
@@ -971,6 +1154,11 @@ Each property test must:
 - Documentation endpoint returns 400 for invalid context (Req 5.4)
 - Config store schema creation on startup
 - CLI --list-packages, --list-templates, --version flags
+- Settings defaults are applied when no env vars are set (Req 19.1)
+- Settings rejects invalid PORT values at startup (Req 19.1)
+- Lifespan handler opens and closes DuckDB connection (Req 19.13)
+- Structured log output is valid JSON with required fields (Req 19.18, 19.19)
+- Log level filtering respects LOG_LEVEL setting (Req 19.20)
 
 ### Frontend Testing
 
@@ -1016,6 +1204,14 @@ Each property test must:
 from hypothesis import settings
 settings.register_profile("ci", max_examples=200)
 settings.register_profile("dev", max_examples=100)
+```
+
+**Backend environment test setup** (for Property 19):
+```python
+# Use monkeypatch or os.environ to set/unset env vars before constructing Settings
+# Clear the lru_cache on get_settings between test runs
+from backend.app.settings import get_settings
+get_settings.cache_clear()
 ```
 
 **Frontend (fast-check)**:

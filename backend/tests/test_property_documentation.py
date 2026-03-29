@@ -8,13 +8,12 @@ Validates: Requirements 5.1, 5.3
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+import pytest
+from hypothesis import given, settings, HealthCheck
 from hypothesis import strategies as st
 from starlette.testclient import TestClient
 
 from backend.app.main import app
-
-client = TestClient(app)
 
 # --- Strategies for building a valid ApplicationContext ---
 
@@ -112,76 +111,93 @@ valid_context_st = st.fixed_dictionaries(
 )
 
 
-@given(ctx=valid_context_st)
-@settings(max_examples=50)
-def test_all_seven_artifacts_present(ctx: dict):
-    """A valid ApplicationContext produces all 7 non-null artifacts."""
-    resp = client.post("/api/documentation/generate", json=ctx)
-    assert resp.status_code == 200, resp.text
-
-    body = resp.json()
-    assert body["archimate"] is not None
-    assert body["bpmn"] is not None
-    assert body["inputDescription"] is not None
-    assert body["outputDescription"] is not None
-    assert body["transformDescription"] is not None
-    assert body["controlTable"] is not None
-    assert body["userInstruction"] is not None
-    assert body["generatedAt"] is not None
+@pytest.fixture()
+def client():
+    """TestClient created after conftest sets DUCKDB_PATH."""
+    with TestClient(app) as c:
+        yield c
 
 
-@given(ctx=valid_context_st)
-@settings(max_examples=30)
-def test_archimate_is_archimate_type(ctx: dict):
-    """The archimate artifact has diagramType ARCHIMATE."""
-    resp = client.post("/api/documentation/generate", json=ctx)
-    assert resp.status_code == 200
-    assert resp.json()["archimate"]["diagramType"] == "ARCHIMATE"
+class TestDocumentationCompleteness:
+    """Documentation generation completeness properties."""
 
+    @given(ctx=valid_context_st)
+    @settings(
+        max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
+    def test_all_seven_artifacts_present(self, ctx: dict, client):
+        """A valid ApplicationContext produces all 7 non-null artifacts."""
+        resp = client.post("/api/documentation/generate", json=ctx)
+        assert resp.status_code == 200, resp.text
 
-@given(ctx=valid_context_st)
-@settings(max_examples=30)
-def test_bpmn_is_bpmn_type(ctx: dict):
-    """The bpmn artifact has diagramType BPMN."""
-    resp = client.post("/api/documentation/generate", json=ctx)
-    assert resp.status_code == 200
-    assert resp.json()["bpmn"]["diagramType"] == "BPMN"
+        body = resp.json()
+        assert body["archimate"] is not None
+        assert body["bpmn"] is not None
+        assert body["inputDescription"] is not None
+        assert body["outputDescription"] is not None
+        assert body["transformDescription"] is not None
+        assert body["controlTable"] is not None
+        assert body["userInstruction"] is not None
+        assert body["generatedAt"] is not None
 
+    @given(ctx=valid_context_st)
+    @settings(
+        max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
+    def test_archimate_is_archimate_type(self, ctx: dict, client):
+        """The archimate artifact has diagramType ARCHIMATE."""
+        resp = client.post("/api/documentation/generate", json=ctx)
+        assert resp.status_code == 200
+        assert resp.json()["archimate"]["diagramType"] == "ARCHIMATE"
 
-@given(ctx=valid_context_st)
-@settings(max_examples=30)
-def test_artifacts_have_nonempty_content(ctx: dict):
-    """All text-based artifacts have non-empty content."""
-    resp = client.post("/api/documentation/generate", json=ctx)
-    assert resp.status_code == 200
-    body = resp.json()
+    @given(ctx=valid_context_st)
+    @settings(
+        max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
+    def test_bpmn_is_bpmn_type(self, ctx: dict, client):
+        """The bpmn artifact has diagramType BPMN."""
+        resp = client.post("/api/documentation/generate", json=ctx)
+        assert resp.status_code == 200
+        assert resp.json()["bpmn"]["diagramType"] == "BPMN"
 
-    assert body["archimate"]["renderedContent"] != ""
-    assert body["bpmn"]["renderedContent"] != ""
-    assert body["inputDescription"]["content"] != ""
-    assert body["outputDescription"]["content"] != ""
-    assert body["transformDescription"]["content"] != ""
-    assert body["userInstruction"]["content"] != ""
+    @given(ctx=valid_context_st)
+    @settings(
+        max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
+    def test_artifacts_have_nonempty_content(self, ctx: dict, client):
+        """All text-based artifacts have non-empty content."""
+        resp = client.post("/api/documentation/generate", json=ctx)
+        assert resp.status_code == 200
+        body = resp.json()
 
+        assert body["archimate"]["renderedContent"] != ""
+        assert body["bpmn"]["renderedContent"] != ""
+        assert body["inputDescription"]["content"] != ""
+        assert body["outputDescription"]["content"] != ""
+        assert body["transformDescription"]["content"] != ""
+        assert body["userInstruction"]["content"] != ""
 
-def test_incomplete_context_returns_400():
-    """An empty ApplicationContext returns 400 with descriptive error."""
-    resp = client.post("/api/documentation/generate", json={})
-    assert resp.status_code == 400
-    detail = resp.json()["detail"]
-    assert "sourceSystem" in detail
-    assert "targetSystem" in detail
-    assert "processSteps" in detail
+    def test_incomplete_context_returns_400(self, client):
+        """An empty ApplicationContext returns 400 with descriptive error."""
+        resp = client.post("/api/documentation/generate", json={})
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "sourceSystem" in detail
+        assert "targetSystem" in detail
+        assert "processSteps" in detail
 
-
-def test_partial_context_returns_400():
-    """A context with only some fields returns 400 listing missing ones."""
-    partial = {
-        "sourceSystem": {"name": "Excel", "systemType": "file", "description": "src"},
-        "targetSystem": {"name": "Afas", "systemType": "erp", "description": "tgt"},
-    }
-    resp = client.post("/api/documentation/generate", json=partial)
-    assert resp.status_code == 400
-    detail = resp.json()["detail"]
-    assert "processSteps" in detail
-    assert "sourceDescription" in detail
+    def test_partial_context_returns_400(self, client):
+        """A context with only some fields returns 400 listing missing ones."""
+        partial = {
+            "sourceSystem": {
+                "name": "Excel",
+                "systemType": "file",
+                "description": "src",
+            },
+            "targetSystem": {"name": "Afas", "systemType": "erp", "description": "tgt"},
+        }
+        resp = client.post("/api/documentation/generate", json=partial)
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "processSteps" in detail
+        assert "sourceDescription" in detail
