@@ -1,0 +1,1 @@
+"""Afas accounting package templates."""

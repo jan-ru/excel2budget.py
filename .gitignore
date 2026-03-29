@@ -49,3 +49,12 @@ ehthumbs.db
 tmp/
 temp/
 *.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.hypothesis/
+.pytest_cache/
+uv.lock

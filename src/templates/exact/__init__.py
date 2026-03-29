@@ -1,0 +1,1 @@
+"""Exact accounting package templates."""
