@@ -20,8 +20,6 @@ out/
 *.swp
 *.swo
 *~
-.DS_Store
-Thumbs.db
 
 # Test coverage
 coverage/
@@ -35,15 +33,11 @@ yarn-error.log*
 
 # OS
 .DS_Store
-.DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
+Thumbs.db
 ehthumbs.db
-
-# Package manager locks (keep one, ignore others as needed)
-# package-lock.json
-# yarn.lock
 
 # Temporary files
 tmp/
@@ -55,7 +49,12 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 *.egg
+.venv/
 .hypothesis/
 .pytest_cache/
 .coverage
-uv.lock
+
+# DuckDB data files (created by config store at runtime)
+*.duckdb
+*.duckdb.wal
+data/

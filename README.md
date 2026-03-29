@@ -1,6 +1,6 @@
 # Data Conversion Tool
 
-A browser-based data conversion platform that transforms financial data between source formats and accounting package import formats. Runs entirely client-side via WebAssembly using [IronCalc](https://www.ironcalc.com/) for spreadsheet rendering and [DuckDB WASM](https://duckdb.org/docs/api/wasm/overview) for SQL-driven transformations.
+A two-tier data conversion platform that transforms financial data between source formats and accounting package import formats. The frontend runs entirely in the browser via WebAssembly ([IronCalc](https://www.ironcalc.com/) for spreadsheet rendering, [DuckDB WASM](https://duckdb.org/docs/api/wasm/overview) for SQL transformations). The backend ([FastAPI](https://fastapi.tiangolo.com/)) serves template definitions, documentation generation, and configuration persistence. Raw financial data never leaves the browser.
 
 ## Overview
 
@@ -12,7 +12,7 @@ This tool is part of a larger system of application modules, each handling a spe
 | **update_forecast** | Update forecast data in accounting packages *(planned)* |
 | **reporting_actuals** | Report actuals data from accounting packages *(planned)* |
 
-All modules share a common **Documentation Module** that generates standardized documentation artifacts via a generic `ApplicationContext` interface.
+All modules share a common Documentation Module that generates standardized documentation artifacts via a generic `ApplicationContext` interface.
 
 ### Supported Accounting Packages
 
@@ -23,171 +23,208 @@ All modules share a common **Documentation Module** that generates standardized 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    Browser UI                        │
-├──────────────┬──────────────┬───────────────────────┤
-│  IronCalc    │  Pipeline    │  Documentation Module  │
-│  WASM        │  Orchestrator│  (7 artifacts)         │
-│  (preview)   │              │                        │
-├──────────────┼──────────────┤  - ArchiMate diagram   │
-│  Excel       │  DuckDB WASM │  - BPMN diagram        │
-│  Importer    │  (transform) │  - Input description   │
-├──────────────┼──────────────┤  - Output description  │
-│  Template    │  Format      │  - Transform description│
-│  Registry    │  Exporter    │  - Control table       │
-│              │              │  - User instruction    │
-└──────────────┴──────────────┴───────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                  Frontend (TypeScript + Vite)                 │
+│  @ui5/webcomponents · DuckDB-WASM · IronCalc-WASM · SheetJS │
+├──────────┬──────────┬──────────┬──────────┬─────────────────┤
+│ Excel    │ SQL      │ IronCalc │ Exporters│ Pipeline        │
+│ Importer │ Generator│ Preview  │ CSV/XLSX │ Orchestrator    │
+│ (SheetJS)│          │          │ PDF      │                 │
+├──────────┴──────────┴──────────┴──────────┴─────────────────┤
+│  Memory Guard · Data Validator · XSS Sanitizer              │
+├─────────────────────────┬────────────────────────────────────┤
+│      API Client         │  REST/JSON (metadata only)         │
+└─────────────────────────┼────────────────────────────────────┘
+                          │
+┌─────────────────────────┴────────────────────────────────────┐
+│                  Backend (FastAPI + Python)                    │
+├──────────┬──────────────┬──────────────┬─────────────────────┤
+│ Template │ Documentation│ Config Store │ CLI                  │
+│ Registry │ Module       │ (DuckDB)     │ (dev/ops)            │
+└──────────┴──────────────┴──────────────┴─────────────────────┘
 ```
+
+### Data Privacy Boundary
+
+All raw financial data (Excel cell values, transformed rows, exported files) stays in the browser. Only metadata and aggregates are sent to the backend for documentation generation.
 
 ## Project Structure
 
 ```
-data-conversion-tool/
-├── src/
-│   ├── core/                  # Shared types, validation, memory safety
-│   │   ├── types.py           # All dataclasses, enums, type aliases
-│   │   ├── validation.py      # TabularData, MappingConfig, UserParams validation
-│   │   └── memory.py          # File size limits, WASM memory checks
-│   ├── modules/
-│   │   └── excel2budget/      # Budget conversion pipeline
-│   │       ├── importer.py    # Excel .xlsx parsing, mapping extraction
-│   │       ├── sql_generator.py # DuckDB SQL generation (UNPIVOT + DC split)
-│   │       ├── pipeline.py    # End-to-end orchestrator
-│   │       └── context_builder.py # ApplicationContext builder for docs
-│   ├── documentation/         # Documentation Module (7 artifacts)
-│   │   ├── module.py          # Orchestrator producing DocumentationPack
-│   │   ├── diagram_generator.py # ArchiMate + BPMN SVG generation
-│   │   ├── control_table.py   # Reconciliation totals
-│   │   ├── description_generator.py # Input/output/transform descriptions
-│   │   └── user_instruction.py # Step-by-step user guide
-│   ├── engine/
-│   │   ├── ironcalc/          # IronCalc WASM integration + XSS sanitizer
-│   │   └── duckdb/            # DuckDB WASM engine wrapper
-│   ├── templates/             # Output templates per accounting package
-│   │   ├── registry.py        # Template lookup and validation
-│   │   ├── twinfield/budget.py # 13-column Twinfield budget schema
-│   │   ├── exact/budget.py    # Exact stub
-│   │   └── afas/budget.py     # Afas stub
-│   ├── export/                # CSV/Excel/PDF exporters
-│   │   ├── exporter.py        # CSV + Excel serialization
-│   │   └── pdf_exporter.py    # Screen-to-PDF via fpdf2
-│   └── ui/
-│       └── app.py             # State-machine UI shell
-├── tests/
-│   ├── property/              # Property-based tests (Hypothesis)
-│   └── unit/                  # Unit tests
-├── .kiro/
-│   └── specs/                 # Spec-driven development artifacts
-│       └── data-conversion-tool/
-├── existing_m_code.md         # Reference Power Query M code
-├── pyproject.toml
+├── backend/                       # FastAPI Python backend
+│   ├── app/
+│   │   ├── main.py                # FastAPI entry point
+│   │   ├── cli.py                 # CLI entry point (dev/ops)
+│   │   ├── core/
+│   │   │   ├── types.py           # Pydantic models (single source of truth)
+│   │   │   └── api_models.py      # API request/response models
+│   │   ├── routers/
+│   │   │   ├── templates.py       # Template registry endpoints
+│   │   │   ├── documentation.py   # Documentation generation endpoint
+│   │   │   └── configurations.py  # Config CRUD endpoints
+│   │   ├── templates/             # Accounting package templates
+│   │   │   ├── registry.py
+│   │   │   ├── afas/budget.py
+│   │   │   ├── exact/budget.py
+│   │   │   └── twinfield/budget.py
+│   │   ├── documentation/         # 7-artifact documentation generator
+│   │   └── persistence/
+│   │       └── config_store.py    # DuckDB config persistence
+│   ├── tests/                     # Hypothesis property tests + integration
+│   └── pyproject.toml
+│
+├── frontend/                      # TypeScript browser application
+│   ├── src/
+│   │   ├── main.ts                # Entry point
+│   │   ├── types/api.d.ts         # Auto-generated from OpenAPI (DO NOT EDIT)
+│   │   ├── api/client.ts          # Typed API client
+│   │   ├── import/excel-importer.ts
+│   │   ├── transform/sql-generator.ts
+│   │   ├── engine/
+│   │   │   ├── duckdb-engine.ts   # DuckDB-WASM wrapper
+│   │   │   └── ironcalc-engine.ts # IronCalc-WASM wrapper
+│   │   ├── validation/data-validator.ts
+│   │   ├── security/xss-sanitizer.ts
+│   │   ├── guards/memory-guard.ts
+│   │   ├── export/
+│   │   │   ├── csv-excel-exporter.ts
+│   │   │   └── pdf-exporter.ts
+│   │   ├── pipeline/
+│   │   │   ├── orchestrator.ts    # Pipeline coordination
+│   │   │   └── context-builder.ts # ApplicationContext builder
+│   │   └── ui/                    # @ui5/webcomponents screens
+│   │       ├── app.ts
+│   │       ├── screens/           # Upload, Preview, Config, Transform, Output, Docs
+│   │       └── components/        # Header, Error banner
+│   ├── scripts/generate-types.ts  # OpenAPI → TypeScript type generation
+│   ├── tests/                     # fast-check property tests + integration
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── src/                           # Original monolithic Python codebase (legacy)
+├── tests/                         # Original test suite (legacy)
 └── README.md
 ```
 
 ## Key Concepts
 
-### Excel as Data + Config
-The Excel budget file serves a dual purpose: it contains both the budget data and the column mapping configuration. The importer reads the file, extracts the mapping (which columns are Entity, Account, DC, months), and presents the data for review.
+### Type Synchronization Pipeline
 
-### DuckDB SQL Transformation
-DuckDB handles the heavy transformation: UNPIVOT of month columns into rows, Debet/Credit splitting based on the DC flag, column renaming, type casting, and rounding — all via generated SQL that is SELECT-only and injection-safe.
+Types flow from Pydantic models on the backend through the auto-generated OpenAPI spec to TypeScript types via `openapi-typescript`. This establishes a single source of truth for the API contract:
+
+```
+Pydantic models → OpenAPI spec (/openapi.json) → openapi-typescript → frontend/src/types/api.d.ts
+```
+
+### DuckDB Dual Usage
+
+DuckDB is used on both sides: native Python on the backend for configuration persistence, and DuckDB-WASM in the browser for SQL-driven data transformation. No SQLite dependency.
 
 ### Documentation Module
-A reusable, application-agnostic module that generates 7 documentation artifacts per conversion configuration via a generic `ApplicationContext`. Each application module populates the context with its own domain metadata.
+
+A reusable, application-agnostic module that generates 7 documentation artifacts per conversion configuration via a generic `ApplicationContext`: ArchiMate diagram, BPMN diagram, input/output/transform descriptions, control table, and user instruction.
 
 ### Control Table
-Every conversion produces a reconciliation sheet proving input totals equal output totals, ensuring no data is lost or corrupted.
 
-### Client-Side Only
-All processing happens in the browser. No budget data is ever transmitted to a server. File size and WASM memory limits are validated before parsing.
+Every conversion produces a reconciliation sheet proving input totals equal output totals, ensuring no data is lost or corrupted.
 
 ## Development
 
 ### Prerequisites
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended) or pip
+- Node.js 18+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended for Python)
 
-### Setup
+### Backend Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/jan-ru/excel2budget.git
-cd excel2budget
-
-# Create virtual environment and install dependencies
+cd backend
 uv venv
-uv sync
-
-# Or with pip
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync --all-extras
 ```
 
-### Dependencies
+### Frontend Setup
 
-Runtime:
-- `openpyxl` — Excel file parsing and writing
-- `fpdf2` — PDF generation
-- `duckdb` — In-process SQL engine
-- `ironcalc` — Spreadsheet engine (optional, for preview)
+```bash
+cd frontend
+npm install
+```
 
-Testing:
-- `pytest` — Test runner
-- `hypothesis` — Property-based testing
+### Type Generation
+
+With the backend running:
+
+```bash
+cd frontend
+npm run generate-types
+```
+
+### Running the Backend
+
+```bash
+cd backend
+uv run uvicorn backend.app.main:app --reload
+```
+
+The OpenAPI spec is served at `http://localhost:8000/openapi.json`.
 
 ### Running Tests
 
-```bash
-# Run all tests
-.venv/bin/python -m pytest
-
-# Run with verbose output
-.venv/bin/python -m pytest -v
-
-# Run only property-based tests
-.venv/bin/python -m pytest tests/property/
-
-# Run only unit tests
-.venv/bin/python -m pytest tests/unit/
-```
-
-All 159 tests should pass. The test suite includes:
-- Property-based tests validating correctness properties (unpivot row counts, DC split, SQL safety, round-trip fidelity, XSS sanitization, etc.)
-- Unit tests for Excel importing and memory safety
-
-### Code Coverage
+Backend (70 tests — Hypothesis property tests + integration):
 
 ```bash
-# Run tests with coverage report
-.venv/bin/python -m pytest --cov=src --cov-report=term-missing -q
+cd backend
+uv run pytest tests/ -v
 ```
 
-| Module | Stmts | Miss | Cover |
-|---|---|---|---|
-| src/core/memory.py | 49 | 3 | 94% |
-| src/core/types.py | 241 | 0 | 100% |
-| src/core/validation.py | 46 | 0 | 100% |
-| src/documentation/control_table.py | 9 | 2 | 78% |
-| src/documentation/description_generator.py | 57 | 0 | 100% |
-| src/documentation/diagram_generator.py | 48 | 7 | 85% |
-| src/documentation/module.py | 21 | 0 | 100% |
-| src/documentation/user_instruction.py | 23 | 0 | 100% |
-| src/engine/duckdb/engine.py | 77 | 8 | 90% |
-| src/engine/ironcalc/engine.py | 185 | 156 | 16% |
-| src/engine/ironcalc/sanitizer.py | 25 | 0 | 100% |
-| src/export/exporter.py | 41 | 5 | 88% |
-| src/export/pdf_exporter.py | 36 | 0 | 100% |
-| src/modules/excel2budget/context_builder.py | 78 | 10 | 87% |
-| src/modules/excel2budget/importer.py | 111 | 4 | 96% |
-| src/modules/excel2budget/pipeline.py | 100 | 20 | 80% |
-| src/modules/excel2budget/sql_generator.py | 56 | 5 | 91% |
-| src/templates/registry.py | 34 | 10 | 71% |
-| src/ui/app.py | 201 | 22 | 89% |
-| **TOTAL** | **1444** | **252** | **83%** |
+Frontend (68 tests — fast-check property tests + integration):
 
-Note: `src/engine/ironcalc/engine.py` has low coverage (16%) because IronCalc WASM requires a native binary that is not exercised in the pure-Python test environment. The sanitizer and all other modules are well covered.
+```bash
+cd frontend
+npx vitest --run
+```
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/templates/packages` | GET | List available accounting packages |
+| `/api/templates/packages/{pkg}/templates` | GET | List templates for a package |
+| `/api/templates/packages/{pkg}/templates/{tpl}` | GET | Get full template definition |
+| `/api/documentation/generate` | POST | Generate documentation artifacts |
+| `/api/configurations` | GET | List saved configurations |
+| `/api/configurations` | POST | Create a configuration |
+| `/api/configurations/{name}` | GET/PUT/DELETE | Read/update/delete a configuration |
+
+### CLI
+
+The backend includes a CLI for dev/ops use:
+
+```bash
+cd backend
+uv run python -m backend.app.cli input.xlsx twinfield budget --budgetcode BC01 --year 2026
+```
+
+### Pre-commit Hooks
+
+The repo uses [pre-commit](https://pre-commit.com/) with local hooks. Install with:
+
+```bash
+uvx pre-commit install
+uvx pre-commit install --hook-type pre-push
+```
+
+On every commit:
+- Ruff lint + format check on backend Python files
+- TypeScript type check (`tsc --noEmit`) on frontend files
+- `api.d.ts` staleness check when backend Pydantic models change
+
+On every push:
+- Full backend test suite (`pytest`)
+- Full frontend test suite (`vitest`)
+
+Run all hooks manually: `uvx pre-commit run --all-files`
 
 ## License
 

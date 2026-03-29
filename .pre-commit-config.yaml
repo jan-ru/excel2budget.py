@@ -1,0 +1,59 @@
+# Pre-commit hooks for the Data Conversion Tool
+# Install: uvx pre-commit install
+# Run manually: uvx pre-commit run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      # --- Backend hooks ---
+
+      - id: backend-ruff-check
+        name: "backend: ruff lint"
+        entry: bash -c 'cd backend && uv run ruff check app/ tests/'
+        language: system
+        files: ^backend/
+        types: [python]
+        pass_filenames: false
+
+      - id: backend-ruff-format
+        name: "backend: ruff format check"
+        entry: bash -c 'cd backend && uv run ruff format --check app/ tests/'
+        language: system
+        files: ^backend/
+        types: [python]
+        pass_filenames: false
+
+      - id: backend-tests
+        name: "backend: pytest"
+        entry: bash -c 'cd backend && uv run pytest tests/ -q --tb=short'
+        language: system
+        files: ^backend/
+        pass_filenames: false
+        stages: [pre-push]
+
+      # --- Frontend hooks ---
+
+      - id: frontend-typecheck
+        name: "frontend: tsc --noEmit"
+        entry: bash -c 'cd frontend && npx tsc --noEmit'
+        language: system
+        files: ^frontend/
+        types: [ts]
+        pass_filenames: false
+
+      - id: frontend-tests
+        name: "frontend: vitest"
+        entry: bash -c 'cd frontend && npx vitest --run'
+        language: system
+        files: ^frontend/
+        pass_filenames: false
+        stages: [pre-push]
+
+      # --- Cross-project hooks ---
+
+      - id: type-generation-staleness
+        name: "types: api.d.ts staleness check"
+        entry: bash scripts/check-types-staleness.sh
+        language: system
+        files: ^backend/app/core/(types|api_models)\.py$
+        pass_filenames: false
