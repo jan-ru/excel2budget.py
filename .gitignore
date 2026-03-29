@@ -57,4 +57,5 @@ __pycache__/
 *.egg
 .hypothesis/
 .pytest_cache/
+.coverage
 uv.lock
