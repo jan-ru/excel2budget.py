@@ -239,3 +239,28 @@ def run_budget_transformation(
     finally:
         if own_db and db is not None:
             db.close()
+
+
+def export_data(
+    data: TabularData,
+    file_format: FileFormat,
+    template: OutputTemplate,
+) -> bytes:
+    """Export transformed TabularData in the requested format.
+
+    Args:
+        data: The transformed TabularData to export.
+        file_format: Target format (CSV or EXCEL).
+        template: Output template for column ordering.
+
+    Returns:
+        Serialized file bytes.
+    """
+    from src.export.exporter import exportToCSV, exportToExcel
+
+    if file_format == FileFormat.CSV:
+        return exportToCSV(data)
+    elif file_format == FileFormat.EXCEL:
+        return exportToExcel(data, template)
+    else:
+        raise ValueError(f"Unsupported file format: {file_format}")
