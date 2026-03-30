@@ -25,9 +25,8 @@ This document specifies the requirements for refactoring the fintran codebase fr
 - **DebitCredit**: A string enum with values `"D"`, `"C"`.
 - **AccountCode**: A NewType string wrapper for account codes (e.g. `"4001"`).
 - **EntityCode**: A NewType string wrapper for entity codes (e.g. `"MS"`, `"MH"`, `"EL"`).
-- **Pure_Function_Layer**: A set of stateless, side-effect-free functions operating on `FinancialDocument` for filtering, variance computation, intercompany elimination, and Polars conversion.
+- **Pure_Function_Layer**: A set of stateless, side-effect-free functions operating on `FinancialDocument` for filtering, variance computation, and intercompany elimination.
 - **TabularData**: The current generic internal representation using `ColumnDef`, `Row`, and `CellValue` — to be replaced by `FinancialDocument`.
-- **Polars**: A DataFrame library used as the bulk computation engine; conversion to/from Pydantic models happens at boundaries only.
 - **Zod**: A TypeScript schema validation library used to define and validate frontend domain types.
 - **Reader**: Any module that ingests external data (Excel files, CSV, API responses) and produces a `FinancialDocument`.
 - **Writer**: Any module that consumes a `FinancialDocument` and produces external output (CSV, Excel, accounting package import files).
@@ -98,7 +97,7 @@ This document specifies the requirements for refactoring the fintran codebase fr
 
 ### Requirement 6: Pure Function Layer
 
-**User Story:** As a developer, I want a set of pure, stateless functions for filtering, variance computation, intercompany elimination, and Polars conversion, so that financial logic is testable, composable, and free of side effects.
+**User Story:** As a developer, I want a set of pure, stateless functions for filtering, variance computation, and intercompany elimination, so that financial logic is testable, composable, and free of side effects.
 
 #### Acceptance Criteria
 
@@ -106,11 +105,8 @@ This document specifies the requirements for refactoring the fintran codebase fr
 2. THE Pure_Function_Layer SHALL provide a `filter_period` function that accepts a `FinancialDocument` and a year (int) and returns a new `FinancialDocument` containing only lines whose period starts with the specified year.
 3. THE Pure_Function_Layer SHALL provide a `compute_variance` function that accepts a `FinancialDocument` and returns a list of `IncomeStatementLine` instances, each containing `variance_bva` (actual minus budget) and `variance_bvf` (forecast minus budget) for each unique account/entity/period combination.
 4. THE Pure_Function_Layer SHALL provide an `eliminate_intercompany` function that accepts a `FinancialDocument` and an elimination `EntityCode` and returns a new `FinancialDocument` with intercompany lines removed or netted to zero.
-5. THE Pure_Function_Layer SHALL provide a `to_polars` function that accepts a `FinancialDocument` and returns a Polars `DataFrame` with one row per `FinancialLine` and columns matching the `FinancialLine` field names.
-6. THE Pure_Function_Layer SHALL provide a `from_polars` function that accepts a Polars `DataFrame` and returns a `FinancialDocument`, reconstructing `FinancialLine` instances from the DataFrame rows.
-7. FOR ALL valid `FinancialDocument` instances, calling `from_polars(to_polars(doc))` SHALL produce a `FinancialDocument` with lines equivalent to the original (round-trip property).
-8. WHEN `filter_entity` is called, THE Pure_Function_Layer SHALL preserve the `accounts` and `entities` tuples and `meta` dictionary from the original `FinancialDocument` unchanged.
-9. WHEN `compute_variance` is called with a `FinancialDocument` containing no lines for a given line_type, THE Pure_Function_Layer SHALL use `Decimal("0")` as the missing amount for that line_type in the variance calculation.
+5. WHEN `filter_entity` is called, THE Pure_Function_Layer SHALL preserve the `accounts` and `entities` tuples and `meta` dictionary from the original `FinancialDocument` unchanged.
+6. WHEN `compute_variance` is called with a `FinancialDocument` containing no lines for a given line_type, THE Pure_Function_Layer SHALL use `Decimal("0")` as the missing amount for that line_type in the variance calculation.
 
 ### Requirement 7: Frontend Pipeline Refactoring
 

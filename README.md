@@ -70,26 +70,28 @@ cd frontend && npm run dev
 ### Test
 
 ```bash
-# Backend (79 tests)
+# Backend (115 tests)
 cd backend && uv run pytest tests/ -v
 
-# Frontend (107 tests)
+# Frontend (145 tests)
 cd frontend && npx vitest --run
 ```
 
 ## Financial Domain Model
 
-The codebase is being aligned with a typed Financial Domain Model defined in [`FinancialDomainModel.md`](FinancialDomainModel.md). The model establishes:
+The codebase uses a typed Financial Domain Model defined in [`FinancialDomainModel.md`](FinancialDomainModel.md) as the canonical intermediate representation (fintran IR). The model is fully implemented:
 
-- Immutable Pydantic types (Python) and Zod schemas (TypeScript) for all financial concepts
-- `FinancialDocument` as the canonical intermediate representation (fintran IR)
-- Pure functions for filtering, variance computation, intercompany elimination, and Polars conversion
-- `frozen=True` on all models — no mutation, ever
+- Immutable Pydantic types (`frozen=True`) in `backend/app/core/domain.py` and Zod schemas in `frontend/src/types/domain.ts`
+- `FinancialDocument` as the fintran IR — every reader produces one, every writer consumes one
+- Pure functions (`filter_entity`, `filter_period`, `compute_variance`, `eliminate_intercompany`) in `backend/app/core/functions.py`
+- Adapter layer (`TabularData ↔ FinancialDocument`) in `backend/app/core/adapters.py` for incremental migration
+- Frontend pipeline (import → orchestrator → export) fully migrated to `FinancialDocument`
 
 See the [spec](.kiro/specs/financial-domain-model/) for requirements, design, and implementation plan.
 
 ## Recent Changes
 
+- **Financial Domain Model**: Implemented the full typed domain model — immutable Pydantic types (backend), Zod schemas (frontend), pure function layer, adapter layer, and frontend pipeline migration to `FinancialDocument` IR. 17 property-based tests validate correctness properties across the stack.
 - **Header Row Selection**: Auto-detects or prompts for the header row when importing Excel files with preamble rows above the actual column headers. Progressive summary shows filename, sheet, and header row as each step resolves.
 - **IronCalc WASM fix**: Fixed WebAssembly loading in Vite dev mode by excluding `@ironcalc/wasm` from dependency pre-bundling.
 - **DuckDB WASM fix**: Switched to Vite `?url` imports for reliable WASM asset resolution in both dev and production.
@@ -105,6 +107,7 @@ See the [spec](.kiro/specs/financial-domain-model/) for requirements, design, an
 | [Configuration](docs/configuration.md) | Environment variables, 12-factor compliance, build/release/run |
 | [API Reference](docs/api.md) | REST endpoints, error handling, OpenAPI spec, metrics |
 | [Development Guide](docs/development.md) | Full setup, type generation, testing, CLI, pre-commit hooks |
+| [Financial Domain Model](FinancialDomainModel.md) | Typed domain model reference — Pydantic types, Zod schemas, pure functions |
 
 ## License
 

@@ -12,12 +12,14 @@
 
 import type { components } from "../types/api";
 import type { Result } from "../api/client";
+import type { FinancialDocument } from "../types/domain";
 import { validateFileSize } from "../guards/memory-guard";
 import * as XLSX from "xlsx";
 import {
   parseExcelFile,
   extractBudgetData,
   extractMappingConfig,
+  tabularBudgetToFinancialDocument,
   scanForHeaderRow,
   getSheetNames,
   hasSheet,
@@ -114,6 +116,7 @@ export class PipelineOrchestrator {
   private _pendingWorkbook: XLSX.WorkBook | null = null;
   private _pendingSheetName: string | null = null;
   private _sourceData: TabularData | null = null;
+  private _financialDocument: FinancialDocument | null = null;
   private _mappingConfig: MappingConfig | null = null;
   private _template: OutputTemplate | null = null;
   private _userParams: UserParams | null = null;
@@ -123,6 +126,8 @@ export class PipelineOrchestrator {
 
   // --- Accessors (read-only) ---
   get sourceData(): TabularData | null { return this._sourceData; }
+  /** The FinancialDocument produced from the imported budget data. */
+  get financialDocument(): FinancialDocument | null { return this._financialDocument; }
   get mappingConfig(): MappingConfig | null { return this._mappingConfig; }
   get template(): OutputTemplate | null { return this._template; }
   get userParams(): UserParams | null { return this._userParams; }
@@ -295,6 +300,7 @@ export class PipelineOrchestrator {
     this._pendingWorkbook = null;
     this._pendingSheetName = null;
     this._sourceData = null;
+    this._financialDocument = null;
     this._mappingConfig = null;
     this._template = null;
     this._userParams = null;
@@ -357,6 +363,15 @@ export class PipelineOrchestrator {
 
     this._sourceData = data;
     this._mappingConfig = mapping;
+
+    // Produce FinancialDocument as the canonical inter-stage representation
+    try {
+      this._financialDocument = tabularBudgetToFinancialDocument(data, mapping, sheetName);
+    } catch {
+      // Non-fatal: FinancialDocument production is best-effort during migration
+      this._financialDocument = null;
+    }
+
     this._pendingWorkbook = null;
     this._pendingSheetName = null;
     return { ok: true, data };

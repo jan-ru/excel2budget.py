@@ -6,7 +6,7 @@ This design describes the refactoring of the fintran codebase from its current g
 
 - **Backend**: Immutable Pydantic models (`frozen=True`) in `backend/app/core/domain.py` for all financial concepts, with `FinancialDocument` as the canonical intermediate representation (IR).
 - **Frontend**: Zod schemas in `frontend/src/types/domain.ts` mirroring the backend models, with inferred TypeScript types.
-- **Pure Function Layer**: Stateless functions in `backend/app/core/functions.py` for filtering, variance computation, intercompany elimination, and Polars conversion.
+- **Pure Function Layer**: Stateless functions in `backend/app/core/functions.py` for filtering, variance computation, and intercompany elimination.
 - **Adapter Layer**: Bidirectional converters between `TabularData` and `FinancialDocument` in `backend/app/core/adapters.py` to enable incremental migration.
 
 The existing pipeline flow (Excel import → DuckDB transform → CSV/Excel export) continues to work throughout the migration via the adapter layer. Once all consumers are migrated, the adapter layer and `TabularData` references are removed.
@@ -128,8 +128,6 @@ def filter_entity(doc: FinancialDocument, entity: EntityCode) -> FinancialDocume
 def filter_period(doc: FinancialDocument, year: int) -> FinancialDocument: ...
 def compute_variance(doc: FinancialDocument) -> list[IncomeStatementLine]: ...
 def eliminate_intercompany(doc: FinancialDocument, elim: EntityCode) -> FinancialDocument: ...
-def to_polars(doc: FinancialDocument) -> pl.DataFrame: ...
-def from_polars(df: pl.DataFrame) -> FinancialDocument: ...
 ```
 
 #### 3. `backend/app/core/adapters.py` — Migration Adapter Layer
@@ -194,7 +192,7 @@ The following existing modules will be updated to consume/produce `FinancialDocu
 | Boundary | Producer | Consumer | Data Type |
 |---|---|---|---|
 | Excel import → Pipeline | Excel Importer | Orchestrator | `FinancialDocument` |
-| Pipeline → Transform | Orchestrator | DuckDB WASM | `FinancialDocument` (via `to_polars`) |
+| Pipeline → Transform | Orchestrator | DuckDB WASM | `FinancialDocument` |
 | Transform → Export | DuckDB WASM | CSV/Excel Exporter | `FinancialDocument` |
 | Backend → Frontend | REST API | Frontend | `FinancialDocument` JSON |
 | Legacy bridge | Adapter | Existing code | `TabularData ↔ FinancialDocument` |
@@ -418,12 +416,6 @@ The Zod schemas mirror the backend models exactly. Key differences:
 
 **Validates: Requirements 8.1, 8.2, 8.3**
 
-### Property 8: Polars conversion round-trip
-
-*For any* valid `FinancialDocument` instance, calling `from_polars(to_polars(doc))` shall produce a `FinancialDocument` with lines equivalent to the original (field values preserved).
-
-**Validates: Requirements 6.5, 6.6, 6.7**
-
 ### Property 9: filter_entity returns only matching lines and preserves metadata
 
 *For any* `FinancialDocument` and *for any* `EntityCode`, calling `filter_entity(doc, entity)` shall return a `FinancialDocument` where every line has `entity` equal to the specified code, and the `accounts`, `entities`, and `meta` fields are identical to the original.
@@ -550,7 +542,6 @@ test.prop([financialDocumentArbitrary], (doc) => {
 | 5: Zod accepts backend JSON | `frontend/tests/types/test_property_domain_zod.test.ts` | fast-check |
 | 6: Zod error messages | `frontend/tests/types/test_property_domain_zod.test.ts` | fast-check |
 | 7: JSON round-trip | `backend/tests/test_property_domain_serialization.py` | Hypothesis |
-| 8: Polars round-trip | `backend/tests/test_property_functions_polars.py` | Hypothesis |
 | 9: filter_entity | `backend/tests/test_property_functions_filter.py` | Hypothesis |
 | 10: filter_period | `backend/tests/test_property_functions_filter.py` | Hypothesis |
 | 11: compute_variance | `backend/tests/test_property_functions_variance.py` | Hypothesis |

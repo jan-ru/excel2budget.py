@@ -13,7 +13,6 @@ The full model is defined in #[[file:FinancialDomainModel.md]].
 - All domain types use `frozen=True` — no mutation, ever
 - `FinancialDocument` is the fintran IR — every reader produces one, every writer consumes one
 - Pure functions in modules, not methods on classes
-- Polars as the bulk engine — convert Pydantic models to/from DataFrames at boundaries only
 - `model_copy(update={})` instead of setters — returns new instance
 
 ## Core Types Reference

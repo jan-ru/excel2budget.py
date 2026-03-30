@@ -7,7 +7,7 @@ The platform is split into two tiers:
 - **Backend** (FastAPI + Python): Template registry, documentation generation, configuration persistence (DuckDB native), CLI
 - **Frontend** (TypeScript + Vite): Excel import, DuckDB-WASM transformation, IronCalc-WASM rendering, validation, export (CSV/Excel/PDF), UI shell (@ui5/webcomponents)
 
-The API contract flows from Pydantic models → auto-generated OpenAPI spec → openapi-typescript → TypeScript types.
+The API contract flows from Pydantic models → auto-generated OpenAPI spec → openapi-typescript → TypeScript types. The financial domain model uses immutable Pydantic types (`frozen=True`) on the backend and Zod schemas on the frontend, with `FinancialDocument` as the canonical intermediate representation (fintran IR) between all readers and writers.
 
 ## Data Flow
 
@@ -51,6 +51,17 @@ DuckDB is used on both sides: native Python on the backend for configuration per
 
 A reusable, application-agnostic module that generates 7 documentation artifacts per conversion configuration via a generic `ApplicationContext`: ArchiMate diagram, BPMN diagram, input/output/transform descriptions, control table, and user instruction.
 
+### Financial Domain Model
+
+The codebase uses a typed Financial Domain Model as the canonical intermediate representation (fintran IR). Key components:
+
+- `backend/app/core/domain.py` — Immutable Pydantic models (`frozen=True`) for all financial concepts: `FinancialDocument`, `FinancialLine`, `BudgetLine`, `ActualLine`, `ForecastLine`, `Account`, `Entity`, dimension enums
+- `backend/app/core/functions.py` — Pure, stateless functions for `filter_entity`, `filter_period`, `compute_variance`, `eliminate_intercompany`
+- `backend/app/core/adapters.py` — Bidirectional converters between legacy `TabularData` and `FinancialDocument` for incremental migration
+- `frontend/src/types/domain.ts` — Zod schemas mirroring the backend models with inferred TypeScript types
+
+Design principles: `frozen=True` on all models (no mutation), `model_copy(update={})` for modifications, pure functions in modules (not methods), tuples for collection fields. See [`FinancialDomainModel.md`](../FinancialDomainModel.md) for the full type reference.
+
 ### Control Table
 
 Every conversion produces a reconciliation sheet proving input totals equal output totals, ensuring no data is lost or corrupted.
@@ -67,7 +78,10 @@ Every conversion produces a reconciliation sheet proving input totals equal outp
 │   │   ├── cli.py                 # CLI entry point (dev/ops)
 │   │   ├── core/
 │   │   │   ├── types.py           # Pydantic models (single source of truth)
-│   │   │   └── api_models.py      # API request/response models
+│   │   │   ├── api_models.py      # API request/response models
+│   │   │   ├── domain.py          # Financial domain model (frozen Pydantic types)
+│   │   │   ├── functions.py       # Pure function layer (filter, variance, eliminate)
+│   │   │   └── adapters.py        # TabularData ↔ FinancialDocument converters
 │   │   ├── routers/               # templates, documentation, configurations
 │   │   ├── templates/             # afas, exact, twinfield definitions
 │   │   ├── documentation/         # 7-artifact documentation generator
@@ -78,16 +92,18 @@ Every conversion produces a reconciliation sheet proving input totals equal outp
 │
 ├── frontend/                      # TypeScript browser application
 │   ├── src/
-│   │   ├── types/api.d.ts         # Auto-generated from OpenAPI (DO NOT EDIT)
+│   │   ├── types/
+│   │   │   ├── api.d.ts           # Auto-generated from OpenAPI (DO NOT EDIT)
+│   │   │   └── domain.ts          # Financial domain Zod schemas + inferred types
 │   │   ├── api/client.ts          # Typed API client
-│   │   ├── import/                # Excel importer (SheetJS)
+│   │   ├── import/                # Excel importer (SheetJS) → produces FinancialDocument
 │   │   ├── transform/             # SQL generator
 │   │   ├── engine/                # DuckDB-WASM + IronCalc-WASM wrappers
 │   │   ├── validation/            # Data validator
 │   │   ├── security/              # XSS sanitizer
 │   │   ├── guards/                # Memory guard
-│   │   ├── export/                # CSV/Excel + PDF exporters
-│   │   ├── pipeline/              # Orchestrator + context builder
+│   │   ├── export/                # CSV/Excel + PDF exporters ← consumes FinancialDocument
+│   │   ├── pipeline/              # Orchestrator + context builder (FinancialDocument IR)
 │   │   └── ui/                    # App shell, screens, components
 │   ├── scripts/generate-types.ts  # OpenAPI → TypeScript type generation
 │   ├── tests/                     # fast-check property tests + integration
@@ -123,4 +139,8 @@ Every conversion produces a reconciliation sheet proving input totals equal outp
 | `src/cli.py` | `backend/app/cli.py` | Backend |
 | *(new)* | `backend/app/settings.py` | Backend |
 | *(new)* | `backend/app/logging_config.py` | Backend |
+| *(new)* | `backend/app/core/domain.py` | Backend |
+| *(new)* | `backend/app/core/functions.py` | Backend |
+| *(new)* | `backend/app/core/adapters.py` | Backend |
+| *(new)* | `frontend/src/types/domain.ts` | Frontend |
 | *(new)* | `backend/run.py` | Backend |

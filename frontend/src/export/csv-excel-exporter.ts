@@ -8,9 +8,13 @@
  */
 
 import type { components } from "../types/api";
+import type { FinancialDocument, FinancialLine } from "../types/domain";
 
 type TabularData = components["schemas"]["TabularData"];
 type CellValue = components["schemas"]["Row"]["values"][number];
+
+/** Column headers for FinancialDocument CSV/Excel export. */
+const FD_COLUMNS = ["account", "entity", "period", "amount", "line_type", "currency", "memo"] as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,7 +57,7 @@ function csvEscape(value: string): string {
 // CSV Export
 // ---------------------------------------------------------------------------
 
-/** Build a CSV string from TabularData. */
+/** Build a CSV string from TabularData. @deprecated Use financialDocumentToCsv instead. */
 export function tabularDataToCsv(data: TabularData): string {
   const header = data.columns.map((c) => csvEscape(c.name)).join(",");
   const rows = data.rows.map((row) =>
@@ -62,7 +66,7 @@ export function tabularDataToCsv(data: TabularData): string {
   return [header, ...rows].join("\n");
 }
 
-/** Trigger a browser download of a CSV file. */
+/** Trigger a browser download of a CSV file. @deprecated Use downloadFinancialDocumentCsv instead. */
 export function downloadCsv(
   data: TabularData,
   filename: string = "export.csv",
@@ -76,20 +80,79 @@ export function downloadCsv(
 // Excel Export (SheetJS / xlsx)
 // ---------------------------------------------------------------------------
 
-/** Build a SheetJS-compatible 2D array from TabularData. */
+/** Build a SheetJS-compatible 2D array from TabularData. @deprecated Use financialDocumentToAoa instead. */
 export function tabularDataToAoa(data: TabularData): string[][] {
   const header = data.columns.map((c) => c.name);
   const rows = data.rows.map((row) => row.values.map(cellValueToString));
   return [header, ...rows];
 }
 
-/** Trigger a browser download of an Excel (.xlsx) file. */
+/** Trigger a browser download of an Excel (.xlsx) file. @deprecated Use downloadFinancialDocumentExcel instead. */
 export async function downloadExcel(
   data: TabularData,
   filename: string = "export.xlsx",
 ): Promise<void> {
   const XLSX = await import("xlsx");
   const aoa = tabularDataToAoa(data);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+  const buf: ArrayBuffer = XLSX.write(wb, {
+    bookType: "xlsx",
+    type: "array",
+  });
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  triggerDownload(blob, filename);
+}
+
+// ---------------------------------------------------------------------------
+// FinancialDocument CSV Export
+// ---------------------------------------------------------------------------
+
+/** Convert a FinancialLine field value to string. */
+function lineFieldToString(line: FinancialLine, field: typeof FD_COLUMNS[number]): string {
+  const val = line[field];
+  if (val === null || val === undefined) return "";
+  return String(val);
+}
+
+/** Build a CSV string from a FinancialDocument (one row per FinancialLine). */
+export function financialDocumentToCsv(doc: FinancialDocument): string {
+  const header = FD_COLUMNS.map((c) => csvEscape(c)).join(",");
+  const rows = doc.lines.map((line) =>
+    FD_COLUMNS.map((col) => csvEscape(lineFieldToString(line, col))).join(","),
+  );
+  return [header, ...rows].join("\n");
+}
+
+/** Build a SheetJS-compatible 2D array from a FinancialDocument. */
+export function financialDocumentToAoa(doc: FinancialDocument): string[][] {
+  const header = [...FD_COLUMNS];
+  const rows = doc.lines.map((line) =>
+    FD_COLUMNS.map((col) => lineFieldToString(line, col)),
+  );
+  return [header, ...rows];
+}
+
+/** Trigger a browser download of a CSV file from a FinancialDocument. */
+export function downloadFinancialDocumentCsv(
+  doc: FinancialDocument,
+  filename: string = "export.csv",
+): void {
+  const csv = financialDocumentToCsv(doc);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  triggerDownload(blob, filename);
+}
+
+/** Trigger a browser download of an Excel file from a FinancialDocument. */
+export async function downloadFinancialDocumentExcel(
+  doc: FinancialDocument,
+  filename: string = "export.xlsx",
+): Promise<void> {
+  const XLSX = await import("xlsx");
+  const aoa = financialDocumentToAoa(doc);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Sheet1");

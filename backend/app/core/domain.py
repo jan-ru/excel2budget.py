@@ -1,42 +1,57 @@
-# Financial Domain Model — Functional Core / OO Shell
+"""Financial Domain Model — immutable Pydantic types.
 
-Python (Pydantic) as canonical master, TypeScript (Zod) as frontend consumer.
+Canonical reference: FinancialDomainModel.md
 
-## Primitive Types
+All models use ``frozen=True`` — no mutation, ever.
+``model_copy(update={})`` instead of setters — returns new instance.
+"""
 
-```python
-from pydantic import BaseModel
+from __future__ import annotations
+
 from decimal import Decimal
-from typing import Literal, NewType
 from enum import StrEnum
+from typing import Literal, NewType
 
-AccountCode = NewType("AccountCode", str)   # e.g. "4001"
-EntityCode  = NewType("EntityCode", str)    # e.g. "MS", "MH", "EL"
-Period      = NewType("Period", str)        # e.g. "2025-03"
+from pydantic import BaseModel
+
+# ---------------------------------------------------------------------------
+# Primitive types
+# ---------------------------------------------------------------------------
+
+AccountCode = NewType("AccountCode", str)
+EntityCode = NewType("EntityCode", str)
+Period = NewType("Period", str)
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
 
 
 class LineType(StrEnum):
-    BUDGET   = "budget"
-    ACTUAL   = "actual"
+    BUDGET = "budget"
+    ACTUAL = "actual"
     FORECAST = "forecast"
 
 
 class AccountType(StrEnum):
-    ASSET     = "asset"
+    ASSET = "asset"
     LIABILITY = "liability"
-    EQUITY    = "equity"
-    REVENUE   = "revenue"
-    EXPENSE   = "expense"
+    EQUITY = "equity"
+    REVENUE = "revenue"
+    EXPENSE = "expense"
 
 
 class DebitCredit(StrEnum):
-    DEBIT  = "D"
+    DEBIT = "D"
     CREDIT = "C"
-```
 
-## Dimension Models
 
-```python
+# ---------------------------------------------------------------------------
+# Dimension models
+# ---------------------------------------------------------------------------
+
+
 class Account(BaseModel, frozen=True):
     code: AccountCode
     description: str
@@ -51,16 +66,18 @@ class Entity(BaseModel, frozen=True):
     is_elimination: bool = False
 
 
-class Period(BaseModel, frozen=True):
-    value: str        # "2025-03"
+class Period(BaseModel, frozen=True):  # noqa: F811 — shadows NewType on purpose
+    value: str
     year: int
     month: int
     fiscal_year: int
-```
 
-## Core Financial Line
 
-```python
+# ---------------------------------------------------------------------------
+# Core financial line
+# ---------------------------------------------------------------------------
+
+
 class FinancialLine(BaseModel, frozen=True):
     account: AccountCode
     entity: EntityCode
@@ -69,11 +86,13 @@ class FinancialLine(BaseModel, frozen=True):
     line_type: LineType
     currency: str = "EUR"
     memo: str | None = None
-```
 
-## Specialised Line Types
 
-```python
+# ---------------------------------------------------------------------------
+# Specialised line types
+# ---------------------------------------------------------------------------
+
+
 class BudgetLine(FinancialLine, frozen=True):
     line_type: Literal[LineType.BUDGET] = LineType.BUDGET
     version: str = "v1"
@@ -87,11 +106,13 @@ class ActualLine(FinancialLine, frozen=True):
 class ForecastLine(FinancialLine, frozen=True):
     line_type: Literal[LineType.FORECAST] = LineType.FORECAST
     basis: Literal["manual", "actuals_adjusted", "budget_adjusted"] = "manual"
-```
 
-## Statement Lines (computed, never stored)
 
-```python
+# ---------------------------------------------------------------------------
+# Statement lines (computed, never stored)
+# ---------------------------------------------------------------------------
+
+
 class IncomeStatementLine(BaseModel, frozen=True):
     account: AccountCode
     entity: EntityCode
@@ -99,8 +120,8 @@ class IncomeStatementLine(BaseModel, frozen=True):
     budget: Decimal
     actual: Decimal
     forecast: Decimal
-    variance_bva: Decimal   # actual vs budget
-    variance_bvf: Decimal   # forecast vs budget
+    variance_bva: Decimal
+    variance_bvf: Decimal
 
 
 class BalanceSheetLine(BaseModel, frozen=True):
@@ -119,31 +140,17 @@ class CashflowLine(BaseModel, frozen=True):
     outflow: Decimal
     net: Decimal
     line_type: LineType
-```
 
-## Intermediate Representation (fintran IR)
 
-```python
+# ---------------------------------------------------------------------------
+# Top-level IR
+# ---------------------------------------------------------------------------
+
+
 class FinancialDocument(BaseModel, frozen=True):
     """Top-level IR — output of any reader, input to any writer."""
+
     lines: tuple[FinancialLine, ...]
     accounts: tuple[Account, ...]
     entities: tuple[Entity, ...]
     meta: dict[str, str]
-```
-
-## Pure Function Layer (signatures)
-
-```python
-def filter_entity(doc: FinancialDocument, entity: EntityCode) -> FinancialDocument: ...
-def filter_period(doc: FinancialDocument, year: int) -> FinancialDocument: ...
-def compute_variance(doc: FinancialDocument) -> list[IncomeStatementLine]: ...
-def eliminate_intercompany(doc: FinancialDocument, elim: EntityCode) -> FinancialDocument: ...
-```
-
-## Design Principles
-
-- `frozen=True` on all models — no mutation, ever
-- `model_copy(update={})` instead of setters — returns new instance
-- Pure functions in modules, not methods on the class
-- `FinancialDocument` is the fintran IR — every reader produces one, every writer consumes one

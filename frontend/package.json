@@ -17,7 +17,8 @@
     "@ui5/webcomponents": "^2.7.0",
     "@ui5/webcomponents-fiori": "^2.7.0",
     "jspdf": "^2.5.2",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "fast-check": "^3.23.0",

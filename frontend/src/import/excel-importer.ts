@@ -10,6 +10,13 @@
 
 import * as XLSX from "xlsx";
 import type { components } from "../types/api";
+import {
+  FinancialDocumentSchema,
+  type FinancialDocument,
+  type FinancialLine,
+  type Account,
+  type Entity,
+} from "../types/domain";
 
 // --- Type aliases from generated API types ---
 type TabularData = components["schemas"]["TabularData"];
@@ -210,6 +217,111 @@ export function extractMappingConfig(
   };
 }
 
+/**
+ * Extract a Zod-validated FinancialDocument from a workbook sheet.
+ *
+ * Parses budget rows into FinancialLine objects (one per account × entity × period),
+ * extracts Account and Entity dimensions, and validates the result with
+ * FinancialDocumentSchema.parse().
+ *
+ * @param workbook Parsed SheetJS workbook.
+ * @param sheetName Sheet to read (default "Budget").
+ * @param headerRowIndex Zero-based header row index (default 0).
+ * @returns A validated FinancialDocument or a ParseError/MappingError.
+ */
+export function extractFinancialDocument(
+  workbook: XLSX.WorkBook,
+  sheetName = "Budget",
+  headerRowIndex = 0,
+): FinancialDocument | ParseError | MappingError {
+  const data = extractBudgetData(workbook, sheetName, headerRowIndex);
+  if (data instanceof ParseError) return data;
+
+  const mapping = extractMappingConfig(workbook, sheetName, headerRowIndex);
+  if (mapping instanceof MappingError) return mapping;
+
+  return tabularBudgetToFinancialDocument(data, mapping, sheetName);
+}
+
+/**
+ * Convert already-extracted TabularData + MappingConfig into a FinancialDocument.
+ * Useful when data and mapping have already been extracted separately.
+ */
+export function tabularBudgetToFinancialDocument(
+  data: TabularData,
+  mapping: MappingConfig,
+  sourceName = "Budget",
+): FinancialDocument {
+  const entityIdx = data.columns.findIndex((c) => c.name === mapping.entityColumn);
+  const accountIdx = data.columns.findIndex((c) => c.name === mapping.accountColumn);
+  const dcIdx = data.columns.findIndex((c) => c.name === mapping.dcColumn);
+
+  const monthIndices = mapping.monthColumns.map((mc) => ({
+    colIdx: data.columns.findIndex((c) => c.name === mc.sourceColumnName),
+    periodNumber: mc.periodNumber,
+    year: mc.year,
+  }));
+
+  const lines: FinancialLine[] = [];
+  const accountSet = new Map<string, Account>();
+  const entitySet = new Map<string, Entity>();
+
+  for (const row of data.rows) {
+    const accountRaw = cellToString(row.values[accountIdx]);
+    if (!accountRaw) continue; // skip rows with missing account
+
+    const entityRaw = cellToString(row.values[entityIdx]);
+    const dcRaw = cellToString(row.values[dcIdx]);
+    const normalBalance = dcRaw === "C" || dcRaw === "D" ? dcRaw : "D";
+
+    // Register account dimension
+    if (!accountSet.has(accountRaw)) {
+      accountSet.set(accountRaw, {
+        code: accountRaw as Account["code"],
+        description: accountRaw,
+        account_type: "expense",
+        normal_balance: normalBalance as Account["normal_balance"],
+        parent_code: null,
+      });
+    }
+
+    // Register entity dimension
+    if (entityRaw && !entitySet.has(entityRaw)) {
+      entitySet.set(entityRaw, {
+        code: entityRaw as Entity["code"],
+        description: entityRaw,
+        is_elimination: false,
+      });
+    }
+
+    // Create one BudgetLine per month column
+    for (const mc of monthIndices) {
+      if (mc.colIdx < 0) continue;
+      const rawAmount = cellToNumber(row.values[mc.colIdx]);
+      const period = `${mc.year}-${String(mc.periodNumber).padStart(2, "0")}`;
+
+      lines.push({
+        account: accountRaw as FinancialLine["account"],
+        entity: (entityRaw || "") as FinancialLine["entity"],
+        period,
+        amount: rawAmount.toFixed(4),
+        line_type: "budget",
+        currency: "EUR",
+        memo: null,
+      });
+    }
+  }
+
+  const doc = {
+    lines,
+    accounts: [...accountSet.values()],
+    entities: [...entitySet.values()],
+    meta: { source: sourceName },
+  };
+
+  return FinancialDocumentSchema.parse(doc);
+}
+
 // --- Sheet helpers ---
 
 /**
@@ -345,4 +457,19 @@ function findColumn(required: string, colNames: string[]): string | null {
 
 function normalizeYear(year: number): number {
   return year < 100 ? 2000 + year : year;
+}
+
+function cellToString(cell: CellValue): string {
+  if (cell.type === "null") return "";
+  if (cell.type === "string") return cell.value;
+  return String((cell as { value: unknown }).value);
+}
+
+function cellToNumber(cell: CellValue): number {
+  if (cell.type === "int" || cell.type === "float") return cell.value;
+  if (cell.type === "string") {
+    const n = parseFloat(cell.value);
+    return isNaN(n) ? 0 : n;
+  }
+  return 0;
 }

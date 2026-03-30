@@ -11,6 +11,7 @@
  */
 
 import type { components } from "../types/api";
+import type { FinancialDocument } from "../types/domain";
 
 // --- Type aliases ---
 type TabularData = components["schemas"]["TabularData"];
@@ -209,6 +210,153 @@ function buildTargetDescription(template: OutputTemplate): DataDescription {
     name: `${template.packageName} ${template.templateName} Import`,
     columns,
     additionalNotes: `Package: ${template.packageName}, Template: ${template.templateName}`,
+  };
+}
+
+/**
+ * Compute reconciliation control totals from a FinancialDocument and transformed data.
+ *
+ * Uses the FinancialDocument lines for input totals and the transformed
+ * TabularData for output totals (Debet/Credit columns).
+ */
+export function computeControlTotalsFromDocument(
+  doc: FinancialDocument,
+  transformedData: TabularData,
+): ControlTotals {
+  let inputRowCount = 0;
+  let inputValueTotal = 0.0;
+
+  for (const line of doc.lines) {
+    inputRowCount++;
+    const amount = parseFloat(line.amount);
+    if (!isNaN(amount)) {
+      inputValueTotal += Math.round(Math.abs(amount) * 10000) / 10000;
+    }
+  }
+
+  // Output totals from transformed TabularData
+  const debetIdx = findColumnIndex(transformedData, "Debet");
+  const creditIdx = findColumnIndex(transformedData, "Credit");
+  let outputDebetTotal = 0.0;
+  let outputCreditTotal = 0.0;
+
+  for (const row of transformedData.rows) {
+    if (debetIdx >= 0 && row.values[debetIdx].type !== "null") {
+      outputDebetTotal += cellToFloat(row.values[debetIdx]);
+    }
+    if (creditIdx >= 0 && row.values[creditIdx].type !== "null") {
+      outputCreditTotal += cellToFloat(row.values[creditIdx]);
+    }
+  }
+
+  const balanceOk = Math.abs(inputValueTotal - (outputDebetTotal + outputCreditTotal)) < 0.01;
+
+  return {
+    inputRowCount,
+    outputRowCount: transformedData.rowCount,
+    inputTotals: [{ label: "Budget Values", value: inputValueTotal }],
+    outputTotals: [
+      { label: "Debet", value: outputDebetTotal },
+      { label: "Credit", value: outputCreditTotal },
+    ],
+    balanceChecks: [
+      {
+        description: "Sum of input values = Sum of Debet + Sum of Credit",
+        passed: balanceOk,
+      },
+    ],
+  };
+}
+
+/**
+ * Build source description from a FinancialDocument.
+ */
+function buildSourceDescriptionFromDocument(
+  doc: FinancialDocument,
+): DataDescription {
+  const accountCount = doc.accounts.length;
+  const entityCount = doc.entities.length;
+  const lineCount = doc.lines.length;
+
+  const columns: ColumnDescription[] = [
+    { name: "account", dataType: "STRING", description: "Account code", source: "FinancialDocument.lines" },
+    { name: "entity", dataType: "STRING", description: "Entity code", source: "FinancialDocument.lines" },
+    { name: "period", dataType: "STRING", description: "Period (YYYY-MM)", source: "FinancialDocument.lines" },
+    { name: "amount", dataType: "STRING", description: "Amount (decimal string)", source: "FinancialDocument.lines" },
+    { name: "line_type", dataType: "STRING", description: "Line type (budget/actual/forecast)", source: "FinancialDocument.lines" },
+  ];
+
+  return {
+    name: "Budget Excel File",
+    columns,
+    additionalNotes:
+      `Accounts: ${accountCount}, Entities: ${entityCount}, Lines: ${lineCount}`,
+  };
+}
+
+/**
+ * Build an ApplicationContext from session data using a FinancialDocument as source.
+ */
+export function buildApplicationContextFromDocument(
+  session: SessionInfo,
+  doc: FinancialDocument,
+  transformedData: TabularData,
+  template: OutputTemplate,
+  sql: string,
+): ApplicationContext {
+  return {
+    applicationName: "excel2budget",
+    configurationName: `${session.packageName} ${session.templateName} ${session.userParams.year}`,
+    configurationDate: session.configurationDate ?? null,
+    sourceSystem: {
+      name: "Excel",
+      systemType: "Spreadsheet",
+      description: `Budget file: ${session.sourceFileName}`,
+    },
+    targetSystem: {
+      name: session.packageName,
+      systemType: "Accounting Package",
+      description: `${session.templateName} import`,
+    },
+    intermediarySystems: [
+      { name: "IronCalc WASM", systemType: "Conversion Tool", description: "Spreadsheet preview" },
+      { name: "DuckDB WASM", systemType: "Conversion Tool", description: "SQL transformation engine" },
+    ],
+    processSteps: [
+      { stepNumber: 1, name: "Upload Excel File", description: "User uploads budget .xlsx file", actor: "User" },
+      { stepNumber: 2, name: "Extract Mapping", description: "System reads column mapping from Excel", actor: "System" },
+      { stepNumber: 3, name: "Set Parameters", description: "User specifies budgetcode and year", actor: "User" },
+      { stepNumber: 4, name: "Run Transformation", description: "DuckDB executes unpivot + DC split", actor: "System" },
+      { stepNumber: 5, name: "Review Output", description: "User reviews transformed data in IronCalc", actor: "User" },
+      { stepNumber: 6, name: "Export", description: "User downloads result as CSV/Excel", actor: "User" },
+    ],
+    sourceDescription: buildSourceDescriptionFromDocument(doc),
+    targetDescription: buildTargetDescription(template),
+    transformDescription: {
+      name: "Budget Unpivot + DC Split",
+      description: "Transforms wide-format budget data into long-format accounting import",
+      steps: [
+        "Filter rows with null account values",
+        "UNPIVOT month columns into (Period, Value) rows",
+        "Extract period number from month column mapping",
+        "Split Value into Debet/Credit based on DC flag",
+        "Add fixed columns (Budgetcode, null placeholders)",
+        "Reorder columns per output template",
+      ],
+      generatedQuery: sql,
+    },
+    controlTotals: computeControlTotalsFromDocument(doc, transformedData),
+    userInstructionSteps: [
+      "Upload your budget Excel file containing the Budget sheet",
+      "Verify the column mapping (Entity, Account, DC, month columns)",
+      `Select the target accounting package: ${session.packageName}`,
+      `Select the template: ${session.templateName}`,
+      `Enter the budgetcode: ${session.userParams.budgetcode}`,
+      `Enter the year: ${session.userParams.year}`,
+      "Click 'Run Transformation' to execute the conversion",
+      "Review the transformed data in the output preview",
+      "Export the result as CSV or Excel for import into your accounting package",
+    ],
   };
 }
 
