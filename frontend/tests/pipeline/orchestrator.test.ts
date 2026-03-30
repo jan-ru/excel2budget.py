@@ -22,6 +22,9 @@ vi.mock("../../src/import/excel-importer", () => ({
   parseExcelFile: vi.fn(),
   extractBudgetData: vi.fn(),
   extractMappingConfig: vi.fn(),
+  scanForHeaderRow: vi.fn(),
+  getSheetNames: vi.fn((wb: any) => wb?.SheetNames ?? []),
+  hasSheet: vi.fn((wb: any, name: string) => (wb?.SheetNames ?? []).includes(name)),
   ParseError: class ParseError extends Error {
     constructor(msg: string) { super(msg); this.name = "ParseError"; }
   },
@@ -59,6 +62,7 @@ import {
   parseExcelFile,
   extractBudgetData,
   extractMappingConfig,
+  scanForHeaderRow,
   ParseError,
   MappingError,
 } from "../../src/import/excel-importer";
@@ -146,7 +150,11 @@ function setupAllSuccess() {
   const template = makeTemplate();
 
   vi.mocked(validateFileSize).mockImplementation(() => {});
-  vi.mocked(parseExcelFile).mockReturnValue({} as any);
+  vi.mocked(parseExcelFile).mockReturnValue({ SheetNames: ["Budget"] } as any);
+  vi.mocked(scanForHeaderRow).mockReturnValue({
+    candidateRows: [0],
+    rawPreview: [["Entity", "Account", "DC", "jan-26"]],
+  });
   vi.mocked(extractBudgetData).mockReturnValue(data);
   vi.mocked(extractMappingConfig).mockReturnValue(mapping);
   vi.mocked(validateMappingConfig).mockReturnValue({ valid: true, errors: [] });

@@ -37,17 +37,23 @@ export async function render(ctx: ScreenContext): Promise<void> {
   }
 
   // PDF options for this screen
-  ctx.getPdfOptions = () => ({
-    metadata: {
-      screenTitle: "Data Preview",
-      configurationName: "",
-      packageName: "",
-      templateName: "",
-      generatedAt: new Date().toISOString(),
-    },
-    content: {
-      contentType: "SPREADSHEET",
-      textContent: `Rows: ${data.rowCount}, Columns: ${data.columns.length}`,
-    },
-  });
+  ctx.getPdfOptions = () => {
+    const header = data.columns.map(c => c.name).join(" | ");
+    const textRows = data.rows
+      .map(r => r.values.map(v => v.type === "null" ? "" : String(v.value)).join(" | "))
+      .join("\n");
+    return {
+      metadata: {
+        screenTitle: "Data Preview",
+        configurationName: "",
+        packageName: "",
+        templateName: "",
+        generatedAt: new Date().toISOString(),
+      },
+      content: {
+        contentType: "SPREADSHEET",
+        textContent: `${header}\n${textRows}`,
+      },
+    };
+  };
 }

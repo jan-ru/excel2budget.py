@@ -77,12 +77,15 @@ export function parseExcelFile(
 }
 
 /**
- * Extract budget data from the named sheet.
+ * Extract budget data from the named sheet, using the specified header row.
+ * @param headerRowIndex Zero-based index of the row to use as column headers.
+ *   Defaults to 0 for backward compatibility.
  * Returns a ParseError if the sheet does not exist or is empty.
  */
 export function extractBudgetData(
   workbook: XLSX.WorkBook,
   sheetName = "Budget",
+  headerRowIndex = 0,
 ): TabularData | ParseError {
   const available = workbook.SheetNames;
   if (!available.includes(sheetName)) {
@@ -103,7 +106,7 @@ export function extractBudgetData(
     return new ParseError(`Sheet '${sheetName}' is empty`, available);
   }
 
-  const headerRow = raw[0];
+  const headerRow = raw[headerRowIndex] ?? [];
   const colNames = headerRow.map((v, i) =>
     v != null ? String(v).trim() : `_col${i}`,
   );
@@ -115,7 +118,7 @@ export function extractBudgetData(
   }));
 
   const rows: Row[] = [];
-  for (let r = 1; r < raw.length; r++) {
+  for (let r = headerRowIndex + 1; r < raw.length; r++) {
     const rawRow = raw[r];
     const values: CellValue[] = [];
     for (let c = 0; c < columns.length; c++) {
@@ -140,12 +143,15 @@ export function extractBudgetData(
 }
 
 /**
- * Extract column mapping configuration from the budget sheet headers.
+ * Extract column mapping configuration from the specified header row.
  * Identifies Entity, Account, DC columns and Dutch month columns.
+ * @param headerRowIndex Zero-based index of the row to use as column headers.
+ *   Defaults to 0 for backward compatibility.
  */
 export function extractMappingConfig(
   workbook: XLSX.WorkBook,
   sheetName = "Budget",
+  headerRowIndex = 0,
 ): MappingConfig | MappingError {
   const available = workbook.SheetNames;
   if (!available.includes(sheetName)) {
@@ -162,7 +168,8 @@ export function extractMappingConfig(
     return new MappingError(`Sheet '${sheetName}' is empty`);
   }
 
-  const colNames = raw[0].map((v, i) =>
+  const headerRow = raw[headerRowIndex] ?? [];
+  const colNames = headerRow.map((v, i) =>
     v != null ? String(v).trim() : `_col${i}`,
   );
 
@@ -200,6 +207,87 @@ export function extractMappingConfig(
     accountColumn: found["Account"],
     dcColumn: found["DC"],
     monthColumns: monthCols,
+  };
+}
+
+// --- Sheet helpers ---
+
+/**
+ * Get the list of sheet names from a parsed workbook.
+ * Returns an empty array if the workbook has no sheets.
+ */
+export function getSheetNames(workbook: XLSX.WorkBook): string[] {
+  return workbook.SheetNames;
+}
+
+/**
+ * Check whether a specific sheet exists in the workbook.
+ */
+export function hasSheet(workbook: XLSX.WorkBook, name: string): boolean {
+  return workbook.SheetNames.includes(name);
+}
+
+// --- Header row scanning ---
+
+/** Result of scanning a sheet for header rows. */
+export interface HeaderScanResult {
+  /** Zero-based indices of rows containing all required columns. */
+  candidateRows: number[];
+  /** First 20 rows of raw data for preview (each row is an array of cell values). */
+  rawPreview: unknown[][];
+}
+
+/**
+ * Check if a row contains all required columns using case-insensitive matching.
+ * Exported for direct testing in property tests.
+ */
+export function rowContainsRequiredColumns(
+  row: unknown[],
+  requiredColumns: readonly string[] = REQUIRED_COLUMNS,
+): boolean {
+  const cells = row.map((v) => (v != null ? String(v).trim().toLowerCase() : ""));
+  return requiredColumns.every((req) => cells.includes(req.toLowerCase()));
+}
+
+/**
+ * Scan the first 20 rows of a sheet for rows containing all required columns.
+ * Uses case-insensitive matching consistent with extractMappingConfig.
+ * If the sheet has fewer than 20 rows, scans all available rows.
+ */
+export function scanForHeaderRow(
+  workbook: XLSX.WorkBook,
+  sheetName: string,
+): HeaderScanResult | ParseError {
+  const available = workbook.SheetNames;
+  if (!available.includes(sheetName)) {
+    return new ParseError(
+      `Sheet '${sheetName}' not found in workbook`,
+      available,
+    );
+  }
+
+  const ws = workbook.Sheets[sheetName];
+  const raw: unknown[][] = XLSX.utils.sheet_to_json(ws, {
+    header: 1,
+    defval: null,
+  });
+
+  if (raw.length === 0) {
+    return new ParseError(`Sheet '${sheetName}' is empty`, available);
+  }
+
+  const scanLimit = Math.min(20, raw.length);
+  const candidateRows: number[] = [];
+
+  for (let i = 0; i < scanLimit; i++) {
+    if (rowContainsRequiredColumns(raw[i])) {
+      candidateRows.push(i);
+    }
+  }
+
+  return {
+    candidateRows,
+    rawPreview: raw.slice(0, scanLimit),
   };
 }
 

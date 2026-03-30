@@ -100,7 +100,8 @@ export async function generatePdf(
     y += lineHeight;
   }
 
-  return doc.output("arraybuffer") as unknown as Uint8Array;
+  const arrayBuffer = doc.output("arraybuffer");
+  return new Uint8Array(arrayBuffer as ArrayBuffer);
 }
 
 /**

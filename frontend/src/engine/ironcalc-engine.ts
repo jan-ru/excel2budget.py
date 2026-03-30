@@ -119,6 +119,20 @@ export async function loadData(
     }
   }
 
+  // Format amount columns (col 5 onward, 1-based) with 2 decimals and right alignment
+  const firstAmountCol = 5; // 1-based: Entity, Account, DC, then month columns start at 5
+  if (data.columns.length >= firstAmountCol) {
+    const amountArea = {
+      sheet: sheetIdx,
+      row: 2,                                       // data rows start at row 2
+      column: firstAmountCol,
+      width: data.columns.length - firstAmountCol + 1,
+      height: data.rows.length,
+    };
+    model.updateRangeStyle(amountArea, "num_fmt", "0.00");
+    model.updateRangeStyle(amountArea, "alignment.horizontal", "right");
+  }
+
   return {
     _model: model,
     sheetIndex: sheetIdx,
@@ -189,6 +203,9 @@ export function renderToElement(
       td.textContent = sanitizeCellValue(raw);
       td.style.border = "1px solid #eee";
       td.style.padding = "4px 8px";
+      if (c >= 5) {
+        td.style.textAlign = "right";
+      }
       tr.appendChild(td);
     }
     tbody.appendChild(tr);

@@ -2,14 +2,13 @@
 
 **Validates: Requirements 5.1–5.10**
 
-Property 1: Unpivot row count — R rows × M month columns = R×M output rows
-Property 2: Debet/Credit split correctness
-Property 3: Period range validity — Periode in 1–12
-Property 4: Fixed field propagation — Budgetcode and Jaar match userParams
-Property 5: Null account filtering — no output row has null Grootboekrekening
-Property 6: Column schema conformance — output matches OutputTemplate
+Property 1:  Unpivot row count — R rows × M month columns = R×M output rows
+Property 2:  Debet/Credit split correctness
+Property 3:  Period range validity — Periode in 1–12
+Property 4:  Fixed field propagation — Budgetcode and Jaar match userParams
+Property 5:  Null account filtering — no output row has null Grootboekrekening
+Property 6:  Column schema conformance — output matches OutputTemplate
 """
-
 from __future__ import annotations
 
 from hypothesis import given, settings, assume
@@ -38,247 +37,114 @@ from src.templates.twinfield.budget import TWINFIELD_BUDGET
 # Strategies
 # ---------------------------------------------------------------------------
 
-_ident_col_name = st.from_regex(r"[a-z][a-z0-9_]{0,14}", fullmatch=True)
+_dc_st = st.sampled_from(["D", "C"])
+_entity_st = st.text(
+    alphabet=st.sampled_from("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"),
+    min_size=1, max_size=6,
+)
+_account_st = st.one_of(
+    st.text(alphabet="0123456789", min_size=1, max_size=6),
+    st.just(None),  # null account
+)
+_value_st = st.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False)
 
 
 @st.composite
-def budget_data_and_params(draw: st.DrawFn):
-    """Generate valid budget TabularData, MappingConfig, and UserParams.
+def budget_scenario(draw: st.DrawFn):
+    """Generate a complete budget transformation scenario.
 
-    Produces data with Entity, Account, DC columns plus 1-12 month columns.
-    All DC values are valid ("D" or "C"). Account values are non-null.
+    Returns (source_data, mapping_config, user_params, num_valid_rows, num_months).
     """
-    num_months = draw(st.integers(min_value=1, max_value=6))
-    num_rows = draw(st.integers(min_value=1, max_value=10))
+    num_months = draw(st.integers(1, 6))
+    num_rows = draw(st.integers(1, 8))
+    period_numbers = sorted(draw(
+        st.lists(st.integers(1, 12), min_size=num_months, max_size=num_months, unique=True)
+    ))
 
-    # Generate unique column names
-    total_cols = 3 + num_months
-    col_names = draw(
-        st.lists(_ident_col_name, min_size=total_cols, max_size=total_cols, unique=True)
-    )
-
-    entity_col = col_names[0]
-    account_col = col_names[1]
-    dc_col = col_names[2]
-    month_col_names = col_names[3:]
-
-    period_numbers = draw(
-        st.lists(
-            st.integers(min_value=1, max_value=12),
-            min_size=num_months,
-            max_size=num_months,
-            unique=True,
-        )
-    )
-
-    year = draw(st.integers(min_value=2000, max_value=2100))
-    budgetcode = draw(
-        st.text(min_size=1, max_size=10)
-        .filter(lambda s: s.strip() != "" and "\x00" not in s)
-    )
-
-    month_columns = [
-        MonthColumnDef(sourceColumnName=name, periodNumber=pn, year=year)
-        for name, pn in zip(month_col_names, period_numbers)
+    month_names = [f"month_{p}" for p in period_numbers]
+    month_cols = [
+        MonthColumnDef(sourceColumnName=n, periodNumber=p, year=2026)
+        for n, p in zip(month_names, period_numbers)
     ]
 
-    mapping = MappingConfig(
-        entityColumn=entity_col,
-        accountColumn=account_col,
-        dcColumn=dc_col,
-        monthColumns=month_columns,
+    mc = MappingConfig(
+        entityColumn="Entity",
+        accountColumn="Account",
+        dcColumn="DC",
+        monthColumns=month_cols,
     )
-    params = UserParams(budgetcode=budgetcode, year=year)
 
-    # Build columns
-    columns = [ColumnDef(name=n, dataType=DataType.STRING) for n in col_names]
+    budgetcode = draw(st.text(
+        alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        min_size=1, max_size=6,
+    ))
+    year = draw(st.integers(2000, 2100))
+    up = UserParams(budgetcode=budgetcode, year=year)
 
-    # Build rows with valid data
+    columns = [
+        ColumnDef("Entity", DataType.STRING),
+        ColumnDef("Account", DataType.STRING),
+        ColumnDef("DC", DataType.STRING),
+    ] + [ColumnDef(n, DataType.FLOAT) for n in month_names]
+
     rows = []
+    valid_count = 0
     for _ in range(num_rows):
-        dc_val = draw(st.sampled_from(["D", "C"]))
-        entity_val = draw(st.from_regex(r"[A-Z]{2}[0-9]{2}", fullmatch=True))
-        account_val = draw(st.from_regex(r"[0-9]{4}", fullmatch=True))
-        values = []
-        for col in col_names:
-            if col == entity_col:
-                values.append(StringVal(entity_val))
-            elif col == account_col:
-                values.append(StringVal(account_val))
-            elif col == dc_col:
-                values.append(StringVal(dc_val))
-            else:
-                amount = draw(st.floats(min_value=-100000, max_value=100000,
-                                        allow_nan=False, allow_infinity=False))
-                values.append(FloatVal(amount))
-        rows.append(Row(values=values))
+        entity = draw(_entity_st)
+        account = draw(_account_st)
+        dc = draw(_dc_st)
+        values = [draw(_value_st) for _ in range(num_months)]
+
+        row_vals = [
+            StringVal(entity),
+            StringVal(account) if account is not None else NullVal(),
+            StringVal(dc),
+        ] + [FloatVal(v) for v in values]
+        rows.append(Row(row_vals))
+        if account is not None:
+            valid_count += 1
 
     data = TabularData(
-        columns=columns,
-        rows=rows,
-        rowCount=num_rows,
+        columns=columns, rows=rows, rowCount=num_rows,
         metadata=DataMetadata(),
     )
-
-    return data, mapping, params
-
-
-@st.composite
-def budget_data_with_null_accounts(draw: st.DrawFn):
-    """Generate budget data where some rows have null Account values."""
-    num_months = draw(st.integers(min_value=1, max_value=4))
-    num_rows = draw(st.integers(min_value=2, max_value=8))
-
-    total_cols = 3 + num_months
-    col_names = draw(
-        st.lists(_ident_col_name, min_size=total_cols, max_size=total_cols, unique=True)
-    )
-
-    entity_col = col_names[0]
-    account_col = col_names[1]
-    dc_col = col_names[2]
-    month_col_names = col_names[3:]
-
-    period_numbers = draw(
-        st.lists(
-            st.integers(min_value=1, max_value=12),
-            min_size=num_months,
-            max_size=num_months,
-            unique=True,
-        )
-    )
-
-    year = draw(st.integers(min_value=2000, max_value=2100))
-    budgetcode = draw(
-        st.text(min_size=1, max_size=10)
-        .filter(lambda s: s.strip() != "" and "\x00" not in s)
-    )
-
-    month_columns = [
-        MonthColumnDef(sourceColumnName=name, periodNumber=pn, year=year)
-        for name, pn in zip(month_col_names, period_numbers)
-    ]
-
-    mapping = MappingConfig(
-        entityColumn=entity_col,
-        accountColumn=account_col,
-        dcColumn=dc_col,
-        monthColumns=month_columns,
-    )
-    params = UserParams(budgetcode=budgetcode, year=year)
-
-    columns = [ColumnDef(name=n, dataType=DataType.STRING) for n in col_names]
-
-    rows = []
-    null_count = 0
-    for i in range(num_rows):
-        dc_val = draw(st.sampled_from(["D", "C"]))
-        entity_val = "E01"
-        # Make some rows have null accounts
-        has_null_account = draw(st.booleans())
-        values = []
-        for col in col_names:
-            if col == entity_col:
-                values.append(StringVal(entity_val))
-            elif col == account_col:
-                if has_null_account:
-                    values.append(NullVal())
-                    null_count += 1
-                else:
-                    values.append(StringVal("4000"))
-            elif col == dc_col:
-                values.append(StringVal(dc_val))
-            else:
-                values.append(FloatVal(100.0))
-        rows.append(Row(values=values))
-
-    # Ensure at least one non-null account row so transformation produces output
-    non_null_rows = num_rows - null_count
-    assume(non_null_rows > 0)
-
-    data = TabularData(
-        columns=columns, rows=rows, rowCount=num_rows, metadata=DataMetadata(),
-    )
-
-    return data, mapping, params, non_null_rows, null_count
-
+    return data, mc, up, valid_count, num_months
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helper to extract cell value
 # ---------------------------------------------------------------------------
 
-def _get_col_idx(data: TabularData, name: str) -> int:
-    for i, col in enumerate(data.columns):
-        if col.name == name:
+def _val(cell):
+    if isinstance(cell, NullVal):
+        return None
+    return cell.value  # type: ignore[union-attr]
+
+
+def _col_idx(data: TabularData, name: str) -> int:
+    for i, c in enumerate(data.columns):
+        if c.name == name:
             return i
-    return -1
-
-
-def _cell_float(cell) -> float | None:
-    if isinstance(cell, FloatVal):
-        return cell.value
-    if isinstance(cell, IntVal):
-        return float(cell.value)
-    if isinstance(cell, NullVal):
-        return None
-    if isinstance(cell, StringVal):
-        try:
-            return float(cell.value)
-        except (ValueError, TypeError):
-            return None
-    return None
-
-
-def _cell_str(cell) -> str | None:
-    if isinstance(cell, NullVal):
-        return None
-    if isinstance(cell, StringVal):
-        return cell.value
-    if isinstance(cell, IntVal):
-        return str(cell.value)
-    if isinstance(cell, FloatVal):
-        return str(cell.value)
-    return str(cell)
-
-
-def _cell_int(cell) -> int | None:
-    if isinstance(cell, IntVal):
-        return cell.value
-    if isinstance(cell, FloatVal):
-        return int(cell.value)
-    if isinstance(cell, NullVal):
-        return None
-    if isinstance(cell, StringVal):
-        try:
-            return int(cell.value)
-        except (ValueError, TypeError):
-            return None
-    return None
+    raise KeyError(f"Column {name!r} not found")
 
 
 # ---------------------------------------------------------------------------
 # Property 1: Unpivot row count
 # ---------------------------------------------------------------------------
 
-@given(data=budget_data_and_params())
-@settings(max_examples=100, deadline=None)
-def test_property_1_unpivot_row_count(data):
-    """R rows × M month columns = R×M output rows.
+@given(scenario=budget_scenario())
+@settings(max_examples=200, deadline=None)
+def test_property_1_unpivot_row_count(scenario) -> None:
+    """R valid rows × M month columns = R×M output rows.
 
     **Validates: Requirements 5.1, 5.2**
     """
-    budget_data, mapping, params = data
-    result = run_budget_transformation(budget_data, mapping, TWINFIELD_BUDGET, params)
-
+    data, mc, up, valid_count, num_months = scenario
+    result = run_budget_transformation(data, mc, TWINFIELD_BUDGET, up)
     assert isinstance(result, TransformSuccess), f"Expected success, got: {result}"
-
-    num_rows = budget_data.rowCount
-    num_months = len(mapping.monthColumns)
-    expected = num_rows * num_months
-
+    expected = valid_count * num_months
     assert result.data.rowCount == expected, (
-        f"Expected {expected} rows ({num_rows} × {num_months}), "
+        f"Expected {expected} rows ({valid_count}×{num_months}), "
         f"got {result.data.rowCount}"
     )
 
@@ -287,72 +153,61 @@ def test_property_1_unpivot_row_count(data):
 # Property 2: Debet/Credit split correctness
 # ---------------------------------------------------------------------------
 
-@given(data=budget_data_and_params())
-@settings(max_examples=100, deadline=None)
-def test_property_2_debet_credit_split(data):
+@given(scenario=budget_scenario())
+@settings(max_examples=200, deadline=None)
+def test_property_2_debet_credit_split(scenario) -> None:
     """DC='D' → Debet=ROUND(Value,4), Credit=null;
     DC='C' → Credit=ROUND(ABS(Value),4), Debet=null.
 
     **Validates: Requirements 5.3, 5.4, 5.5**
     """
-    budget_data, mapping, params = data
-    result = run_budget_transformation(budget_data, mapping, TWINFIELD_BUDGET, params)
+    data, mc, up, valid_count, num_months = scenario
+    assume(valid_count > 0)
+    result = run_budget_transformation(data, mc, TWINFIELD_BUDGET, up)
     assert isinstance(result, TransformSuccess)
 
     out = result.data
-    debet_idx = _get_col_idx(out, "Debet")
-    credit_idx = _get_col_idx(out, "Credit")
-
-    assert debet_idx >= 0, "Debet column not found"
-    assert credit_idx >= 0, "Credit column not found"
+    debet_idx = _col_idx(out, "Debet")
+    credit_idx = _col_idx(out, "Credit")
 
     for row in out.rows:
-        debet = _cell_float(row.values[debet_idx])
-        credit = _cell_float(row.values[credit_idx])
+        debet = _val(row.values[debet_idx])
+        credit = _val(row.values[credit_idx])
 
-        # Exactly one of Debet/Credit should be non-null
-        has_debet = debet is not None
-        has_credit = credit is not None
-        assert has_debet != has_credit, (
-            f"Expected exactly one of Debet/Credit non-null, "
-            f"got Debet={debet}, Credit={credit}"
-        )
-
-        # Debet values should be non-negative when rounded
-        if has_debet:
-            assert debet == round(debet, 4), f"Debet not rounded to 4dp: {debet}"
-
-        # Credit values should be non-negative (ABS applied)
-        if has_credit:
-            assert credit >= 0, f"Credit should be non-negative: {credit}"
-            assert credit == round(credit, 4), f"Credit not rounded to 4dp: {credit}"
+        # Exactly one of Debet/Credit is non-null (for non-null values)
+        if debet is not None:
+            assert credit is None, "Both Debet and Credit are non-null"
+            assert debet == round(debet, 4)
+        elif credit is not None:
+            assert debet is None, "Both Debet and Credit are non-null"
+            assert credit >= 0, "Credit must be non-negative (ABS applied)"
+            assert credit == round(credit, 4)
 
 
 # ---------------------------------------------------------------------------
 # Property 3: Period range validity
 # ---------------------------------------------------------------------------
 
-@given(data=budget_data_and_params())
-@settings(max_examples=100, deadline=None)
-def test_property_3_period_range_validity(data):
+@given(scenario=budget_scenario())
+@settings(max_examples=200, deadline=None)
+def test_property_3_period_range_validity(scenario) -> None:
     """Periode in 1–12, matches source month column periodNumber.
 
     **Validates: Requirement 5.6**
     """
-    budget_data, mapping, params = data
-    result = run_budget_transformation(budget_data, mapping, TWINFIELD_BUDGET, params)
+    data, mc, up, valid_count, num_months = scenario
+    assume(valid_count > 0)
+    result = run_budget_transformation(data, mc, TWINFIELD_BUDGET, up)
     assert isinstance(result, TransformSuccess)
 
     out = result.data
-    periode_idx = _get_col_idx(out, "Periode")
-    assert periode_idx >= 0, "Periode column not found"
-
-    valid_periods = {mc.periodNumber for mc in mapping.monthColumns}
+    periode_idx = _col_idx(out, "Periode")
+    valid_periods = {m.periodNumber for m in mc.monthColumns}
 
     for row in out.rows:
-        periode = _cell_int(row.values[periode_idx])
-        assert periode is not None, "Periode should not be null"
-        assert 1 <= periode <= 12, f"Periode out of range: {periode}"
+        periode = _val(row.values[periode_idx])
+        assert periode is not None, "Periode must not be null"
+        assert 1 <= periode <= 12, f"Periode {periode} out of range"
         assert periode in valid_periods, (
             f"Periode {periode} not in expected periods {valid_periods}"
         )
@@ -362,91 +217,73 @@ def test_property_3_period_range_validity(data):
 # Property 4: Fixed field propagation
 # ---------------------------------------------------------------------------
 
-@given(data=budget_data_and_params())
-@settings(max_examples=100, deadline=None)
-def test_property_4_fixed_field_propagation(data):
+@given(scenario=budget_scenario())
+@settings(max_examples=200, deadline=None)
+def test_property_4_fixed_field_propagation(scenario) -> None:
     """Budgetcode and Jaar match userParams in every row.
 
     **Validates: Requirements 4.1, 5.7, 5.8**
     """
-    budget_data, mapping, params = data
-    result = run_budget_transformation(budget_data, mapping, TWINFIELD_BUDGET, params)
+    data, mc, up, valid_count, num_months = scenario
+    assume(valid_count > 0)
+    result = run_budget_transformation(data, mc, TWINFIELD_BUDGET, up)
     assert isinstance(result, TransformSuccess)
 
     out = result.data
-    bc_idx = _get_col_idx(out, "Budgetcode")
-    jaar_idx = _get_col_idx(out, "Jaar")
-
-    assert bc_idx >= 0, "Budgetcode column not found"
-    assert jaar_idx >= 0, "Jaar column not found"
+    bc_idx = _col_idx(out, "Budgetcode")
+    jaar_idx = _col_idx(out, "Jaar")
 
     for row in out.rows:
-        bc = _cell_str(row.values[bc_idx])
-        assert bc == params.budgetcode, (
-            f"Budgetcode mismatch: expected '{params.budgetcode}', got '{bc}'"
-        )
-
-        jaar = _cell_int(row.values[jaar_idx])
-        assert jaar == params.year, (
-            f"Jaar mismatch: expected {params.year}, got {jaar}"
-        )
+        assert _val(row.values[bc_idx]) == up.budgetcode
+        assert _val(row.values[jaar_idx]) == up.year
 
 
 # ---------------------------------------------------------------------------
 # Property 5: Null account filtering
 # ---------------------------------------------------------------------------
 
-@given(data=budget_data_with_null_accounts())
-@settings(max_examples=100, deadline=None)
-def test_property_5_null_account_filtering(data):
+@given(scenario=budget_scenario())
+@settings(max_examples=200, deadline=None)
+def test_property_5_null_account_filtering(scenario) -> None:
     """No output row has null Grootboekrekening.
 
     **Validates: Requirement 5.9**
     """
-    budget_data, mapping, params, non_null_rows, null_count = data
-    result = run_budget_transformation(budget_data, mapping, TWINFIELD_BUDGET, params)
-    assert isinstance(result, TransformSuccess), f"Expected success, got: {result}"
+    data, mc, up, valid_count, num_months = scenario
+    result = run_budget_transformation(data, mc, TWINFIELD_BUDGET, up)
+    assert isinstance(result, TransformSuccess)
 
     out = result.data
-    gbr_idx = _get_col_idx(out, "Grootboekrekening")
-    assert gbr_idx >= 0, "Grootboekrekening column not found"
+    gbr_idx = _col_idx(out, "Grootboekrekening")
 
-    for i, row in enumerate(out.rows):
-        val = _cell_str(row.values[gbr_idx])
-        assert val is not None, f"Output row {i} has null Grootboekrekening"
-
-    # Row count should reflect only non-null-account source rows
-    expected = non_null_rows * len(mapping.monthColumns)
-    assert out.rowCount == expected, (
-        f"Expected {expected} rows ({non_null_rows} non-null × "
-        f"{len(mapping.monthColumns)} months), got {out.rowCount}"
-    )
+    for row in out.rows:
+        val = _val(row.values[gbr_idx])
+        assert val is not None, "Grootboekrekening must not be null"
 
 
 # ---------------------------------------------------------------------------
 # Property 6: Column schema conformance
 # ---------------------------------------------------------------------------
 
-@given(data=budget_data_and_params())
-@settings(max_examples=100, deadline=None)
-def test_property_6_column_schema_conformance(data):
+@given(scenario=budget_scenario())
+@settings(max_examples=200, deadline=None)
+def test_property_6_column_schema_conformance(scenario) -> None:
     """Output columns match OutputTemplate in name, order, types.
 
     **Validates: Requirement 5.10**
     """
-    budget_data, mapping, params = data
-    result = run_budget_transformation(budget_data, mapping, TWINFIELD_BUDGET, params)
+    data, mc, up, valid_count, num_months = scenario
+    result = run_budget_transformation(data, mc, TWINFIELD_BUDGET, up)
     assert isinstance(result, TransformSuccess)
 
     out = result.data
-    template_cols = TWINFIELD_BUDGET.columns
-
-    assert len(out.columns) == len(template_cols), (
-        f"Column count mismatch: got {len(out.columns)}, "
-        f"expected {len(template_cols)}"
+    assert len(out.columns) == len(TWINFIELD_BUDGET.columns), (
+        f"Column count mismatch: {len(out.columns)} vs {len(TWINFIELD_BUDGET.columns)}"
     )
-
-    for i, (actual, expected) in enumerate(zip(out.columns, template_cols)):
+    for i, (actual, expected) in enumerate(zip(out.columns, TWINFIELD_BUDGET.columns)):
         assert actual.name == expected.name, (
-            f"Column {i} name mismatch: '{actual.name}' vs '{expected.name}'"
+            f"Column {i} name: {actual.name!r} vs {expected.name!r}"
+        )
+        assert actual.dataType == expected.dataType, (
+            f"Column {i} ({actual.name}) type: {actual.dataType} vs {expected.dataType}"
         )

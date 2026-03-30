@@ -8,6 +8,10 @@
  */
 
 import * as duckdb from "@duckdb/duckdb-wasm";
+import duckdb_mvp_wasm from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
+import duckdb_mvp_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
+import duckdb_eh_wasm from "@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url";
+import duckdb_eh_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url";
 import * as arrow from "apache-arrow";
 import type { components } from "../types/api";
 
@@ -243,23 +247,18 @@ function escapeIdent(name: string): string {
 /**
  * Build DuckDB bundle paths.
  *
- * In a Vite environment the WASM/worker assets are served from
- * node_modules via the dev server or bundled at build time.
+ * Uses Vite's ?url imports so asset URLs are resolved correctly
+ * in both dev and production builds.
  */
 async function pickBundles(): Promise<duckdb.DuckDBBundles> {
-  const base = import.meta.url
-    ? new URL("../../node_modules/@duckdb/duckdb-wasm/dist/", import.meta.url)
-        .href
-    : "/node_modules/@duckdb/duckdb-wasm/dist/";
-
   return {
     mvp: {
-      mainModule: `${base}duckdb-mvp.wasm`,
-      mainWorker: `${base}duckdb-browser-mvp.worker.js`,
+      mainModule: duckdb_mvp_wasm,
+      mainWorker: duckdb_mvp_worker,
     },
     eh: {
-      mainModule: `${base}duckdb-eh.wasm`,
-      mainWorker: `${base}duckdb-browser-eh.worker.js`,
+      mainModule: duckdb_eh_wasm,
+      mainWorker: duckdb_eh_worker,
     },
   };
 }

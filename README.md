@@ -73,9 +73,29 @@ cd frontend && npm run dev
 # Backend (79 tests)
 cd backend && uv run pytest tests/ -v
 
-# Frontend (68 tests)
+# Frontend (107 tests)
 cd frontend && npx vitest --run
 ```
+
+## Financial Domain Model
+
+The codebase is being aligned with a typed Financial Domain Model defined in [`FinancialDomainModel.md`](FinancialDomainModel.md). The model establishes:
+
+- Immutable Pydantic types (Python) and Zod schemas (TypeScript) for all financial concepts
+- `FinancialDocument` as the canonical intermediate representation (fintran IR)
+- Pure functions for filtering, variance computation, intercompany elimination, and Polars conversion
+- `frozen=True` on all models — no mutation, ever
+
+See the [spec](.kiro/specs/financial-domain-model/) for requirements, design, and implementation plan.
+
+## Recent Changes
+
+- **Header Row Selection**: Auto-detects or prompts for the header row when importing Excel files with preamble rows above the actual column headers. Progressive summary shows filename, sheet, and header row as each step resolves.
+- **IronCalc WASM fix**: Fixed WebAssembly loading in Vite dev mode by excluding `@ironcalc/wasm` from dependency pre-bundling.
+- **DuckDB WASM fix**: Switched to Vite `?url` imports for reliable WASM asset resolution in both dev and production.
+- **PDF export fix**: Fixed corrupt PDF downloads caused by incorrect `ArrayBuffer` → `Uint8Array` handling, and added actual grid data to PDF content.
+- **CORS**: Added CORS middleware to the FastAPI backend for cross-origin requests from the Vite dev server.
+- **Number formatting**: Amount columns (col 5+) now display with 2 decimal places and right alignment in the IronCalc preview.
 
 ## Documentation
 

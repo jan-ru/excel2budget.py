@@ -13,10 +13,14 @@
 import type { components } from "../types/api";
 import type { Result } from "../api/client";
 import { validateFileSize } from "../guards/memory-guard";
+import * as XLSX from "xlsx";
 import {
   parseExcelFile,
   extractBudgetData,
   extractMappingConfig,
+  scanForHeaderRow,
+  getSheetNames,
+  hasSheet,
   ParseError,
   MappingError,
 } from "../import/excel-importer";
@@ -34,6 +38,40 @@ type TabularData = components["schemas"]["TabularData"];
 type MappingConfig = components["schemas"]["MappingConfig"];
 type OutputTemplate = components["schemas"]["OutputTemplate"];
 type UserParams = components["schemas"]["UserParams"];
+
+// --- Sheet selection types ---
+
+/** Returned when the user must select a sheet before import can proceed. */
+export interface SheetSelectionNeeded {
+  needsSelection: true;
+  sheetNames: string[];
+}
+
+/** Returned when the user must select a header row. */
+export interface HeaderSelectionNeeded {
+  needsHeaderSelection: true;
+  /** Zero-based candidate row indices (may be empty). */
+  candidateRows: number[];
+  /** First 20 rows of raw sheet data for preview display. */
+  rawPreview: unknown[][];
+}
+
+/** Union of possible import outcomes. */
+export type ImportResult = Result<TabularData> | SheetSelectionNeeded | HeaderSelectionNeeded;
+
+/** Type guard for SheetSelectionNeeded. */
+export function isSheetSelectionNeeded(
+  result: ImportResult,
+): result is SheetSelectionNeeded {
+  return "needsSelection" in result && (result as SheetSelectionNeeded).needsSelection === true;
+}
+
+/** Type guard for HeaderSelectionNeeded. */
+export function isHeaderSelectionNeeded(
+  result: ImportResult,
+): result is HeaderSelectionNeeded {
+  return "needsHeaderSelection" in result && (result as HeaderSelectionNeeded).needsHeaderSelection === true;
+}
 
 // --- Pipeline step names (for error reporting) ---
 export type PipelineStep =
@@ -73,6 +111,8 @@ export interface PipelineTrace {
  */
 export class PipelineOrchestrator {
   // Session state (ephemeral)
+  private _pendingWorkbook: XLSX.WorkBook | null = null;
+  private _pendingSheetName: string | null = null;
   private _sourceData: TabularData | null = null;
   private _mappingConfig: MappingConfig | null = null;
   private _template: OutputTemplate | null = null;
@@ -92,9 +132,10 @@ export class PipelineOrchestrator {
 
   /**
    * Import a file: validate size, parse Excel, extract data + mapping.
+   * Returns SheetSelectionNeeded when no "Budget" sheet exists.
    * Halts on first error.
    */
-  async importFile(file: File): Promise<Result<TabularData>> {
+  async importFile(file: File): Promise<ImportResult> {
     this._resetTrace();
 
     // Step 1: Memory guard
@@ -113,23 +154,47 @@ export class PipelineOrchestrator {
       return this._fail("excel_parse", workbook.message);
     }
 
-    // Step 3: Extract budget data
-    this._markStep("extract_data");
-    const data = extractBudgetData(workbook);
-    if (data instanceof ParseError) {
-      return this._fail("extract_data", data.message);
+    // Step 2b: Check for zero sheets
+    const sheetNames = getSheetNames(workbook);
+    if (sheetNames.length === 0) {
+      return this._fail("excel_parse", "Workbook contains no sheets");
     }
 
-    // Step 4: Extract mapping config
-    this._markStep("extract_mapping");
-    const mapping = extractMappingConfig(workbook);
-    if (mapping instanceof MappingError) {
-      return this._fail("extract_mapping", mapping.message);
+    // Step 2c: Check for "Budget" sheet
+    if (!hasSheet(workbook, "Budget")) {
+      this._pendingWorkbook = workbook;
+      return { needsSelection: true, sheetNames };
     }
 
-    this._sourceData = data;
-    this._mappingConfig = mapping;
-    return { ok: true, data };
+    // Step 3: Scan for header row
+    return this._resolveHeaderRow(workbook, "Budget");
+  }
+
+  /**
+   * Import data from a specific sheet in the pending workbook.
+   * Call this after `importFile` returns `SheetSelectionNeeded`.
+   * On success, releases the pending workbook. On failure, keeps it
+   * so the user can retry with a different sheet.
+   */
+  async importWithSheet(sheetName: string): Promise<ImportResult> {
+    if (this._pendingWorkbook == null) {
+      return this._fail("extract_data", "No pending workbook. Call importFile() first.");
+    }
+
+    return this._resolveHeaderRow(this._pendingWorkbook, sheetName);
+  }
+
+  /**
+   * Import data using a user-selected header row from the pending workbook/sheet.
+   * Call this after `importFile` or `importWithSheet` returns `HeaderSelectionNeeded`.
+   * On success, clears pending state. On failure, keeps pending state so user can retry.
+   */
+  async importWithHeaderRow(headerRowIndex: number): Promise<Result<TabularData>> {
+    if (this._pendingWorkbook == null || this._pendingSheetName == null) {
+      return this._fail("extract_data", "No pending import. Call importFile() first.");
+    }
+
+    return this._extractWithHeaderRow(this._pendingWorkbook, this._pendingSheetName, headerRowIndex);
   }
 
   /**
@@ -219,8 +284,16 @@ export class PipelineOrchestrator {
     }
   }
 
+  /** Release the pending workbook without proceeding. Safe to call anytime. */
+  cancelPendingImport(): void {
+    this._pendingWorkbook = null;
+    this._pendingSheetName = null;
+  }
+
   /** Reset all session state. */
   reset(): void {
+    this._pendingWorkbook = null;
+    this._pendingSheetName = null;
     this._sourceData = null;
     this._mappingConfig = null;
     this._template = null;
@@ -231,6 +304,63 @@ export class PipelineOrchestrator {
   }
 
   // --- Internal helpers ---
+
+  /**
+   * Scan for header row and either auto-extract or return HeaderSelectionNeeded.
+   * Shared logic for importFile (Budget sheet) and importWithSheet.
+   */
+  private _resolveHeaderRow(workbook: XLSX.WorkBook, sheetName: string): ImportResult {
+    const scanResult = scanForHeaderRow(workbook, sheetName);
+    if (scanResult instanceof ParseError) {
+      return this._fail("extract_data", scanResult.message);
+    }
+
+    const { candidateRows, rawPreview } = scanResult;
+
+    // Row 0 is a candidate → auto-select row 0
+    if (candidateRows.includes(0)) {
+      return this._extractWithHeaderRow(workbook, sheetName, 0);
+    }
+
+    // Exactly one candidate (not row 0) → auto-select
+    if (candidateRows.length === 1) {
+      return this._extractWithHeaderRow(workbook, sheetName, candidateRows[0]);
+    }
+
+    // Zero or multiple candidates → prompt user
+    this._pendingWorkbook = workbook;
+    this._pendingSheetName = sheetName;
+    return { needsHeaderSelection: true, candidateRows, rawPreview };
+  }
+
+  /**
+   * Extract budget data and mapping config using a specific header row index.
+   * On success, stores data/mapping and clears pending state.
+   * On failure, keeps pending state so user can retry.
+   */
+  private _extractWithHeaderRow(
+    workbook: XLSX.WorkBook,
+    sheetName: string,
+    headerRowIndex: number,
+  ): Result<TabularData> {
+    this._markStep("extract_data");
+    const data = extractBudgetData(workbook, sheetName, headerRowIndex);
+    if (data instanceof ParseError) {
+      return this._fail("extract_data", data.message);
+    }
+
+    this._markStep("extract_mapping");
+    const mapping = extractMappingConfig(workbook, sheetName, headerRowIndex);
+    if (mapping instanceof MappingError) {
+      return this._fail("extract_mapping", mapping.message);
+    }
+
+    this._sourceData = data;
+    this._mappingConfig = mapping;
+    this._pendingWorkbook = null;
+    this._pendingSheetName = null;
+    return { ok: true, data };
+  }
 
   private _resetTrace(): void {
     this._trace = { executedSteps: [], failedStep: null };

@@ -14,6 +14,12 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    fs: {
+      allow: ['..'],
+    },
+  },
+  optimizeDeps: {
+    exclude: ['@duckdb/duckdb-wasm', '@ironcalc/wasm'],
   },
   test: {
     globals: true,

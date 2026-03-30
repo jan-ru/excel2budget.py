@@ -67,16 +67,20 @@ export async function render(ctx: ScreenContext): Promise<void> {
   }
 
   // PDF options for header button
-  ctx.getPdfOptions = () => ({
-    metadata: {
-      screenTitle: "Transformation Output",
-      configurationName: orchestrator.template?.packageName ?? "",
-      packageName: orchestrator.template?.packageName ?? "",
-      templateName: orchestrator.template?.templateName ?? "",
-      generatedAt: new Date().toISOString(),
-    },
-    content: { contentType: "SPREADSHEET", textContent: `${data.rowCount} rows, ${data.columns.length} columns` },
-  });
+  ctx.getPdfOptions = () => {
+    const header = data.columns.map(c => c.name).join(" | ");
+    const textRows = data.rows.map(r => r.values.map(cellValueToString).join(" | ")).join("\n");
+    return {
+      metadata: {
+        screenTitle: "Transformation Output",
+        configurationName: orchestrator.template?.packageName ?? "",
+        packageName: orchestrator.template?.packageName ?? "",
+        templateName: orchestrator.template?.templateName ?? "",
+        generatedAt: new Date().toISOString(),
+      },
+      content: { contentType: "SPREADSHEET", textContent: `${header}\n${textRows}` },
+    };
+  };
 }
 
 function exportButton(text: string, onClick: () => Promise<void>): HTMLButtonElement {

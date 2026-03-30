@@ -82,7 +82,7 @@ Browser-based budget data conversion pipeline using IronCalc WASM (spreadsheet p
     - Ensure generated SQL is SELECT-only (no DDL/DML)
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 5.1, 5.3, 5.4, 5.6, 5.7, 5.8_
 
-  - [-] 5.2 Write property tests for SQL generation
+  - [x] 5.2 Write property tests for SQL generation
     - **Property 11: Generated SQL validity and safety** — valid DuckDB SQL, SELECT-only, references only "budget" table
     - **Property 12: SQL injection prevention** — adversarial column names with SQL metacharacters are properly escaped/rejected
     - **Validates: Requirements 6.1, 6.2, 6.3, 6.4**

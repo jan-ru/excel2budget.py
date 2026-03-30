@@ -35,6 +35,10 @@ vi.mock("../../src/import/excel-importer", () => ({
   parseExcelFile: vi.fn(),
   extractBudgetData: vi.fn(),
   extractMappingConfig: vi.fn(),
+  scanForHeaderRow: vi.fn(() => ({ candidateRows: [0], rawPreview: [] })),
+  rowContainsRequiredColumns: vi.fn(() => true),
+  getSheetNames: vi.fn((wb: any) => wb?.SheetNames ?? []),
+  hasSheet: vi.fn((wb: any, name: string) => (wb?.SheetNames ?? []).includes(name)),
   ParseError: class ParseError extends Error {
     constructor(msg: string) {
       super(msg);
@@ -248,7 +252,7 @@ describe("Integration: Full Pipeline Flow", () => {
     const transformedData = makeTransformedData();
 
     // Setup mocks for import phase
-    vi.mocked(parseExcelFile).mockReturnValue({} as any);
+    vi.mocked(parseExcelFile).mockReturnValue({ SheetNames: ["Budget"] } as any);
     vi.mocked(extractBudgetData).mockReturnValue(sourceData);
     vi.mocked(extractMappingConfig).mockReturnValue(mapping);
     vi.mocked(duckdb.initialize).mockResolvedValue(undefined);
@@ -328,7 +332,7 @@ describe("Integration: Full Pipeline Flow", () => {
       rowCount: 1,
     };
 
-    vi.mocked(parseExcelFile).mockReturnValue({} as any);
+    vi.mocked(parseExcelFile).mockReturnValue({ SheetNames: ["Budget"] } as any);
     vi.mocked(extractBudgetData).mockReturnValue(badSourceData);
     vi.mocked(extractMappingConfig).mockReturnValue(makeMappingConfig());
 
