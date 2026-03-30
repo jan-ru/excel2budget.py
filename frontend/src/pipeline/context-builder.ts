@@ -294,15 +294,21 @@ function buildSourceDescriptionFromDocument(
   };
 }
 
-/**
- * Build an ApplicationContext from session data using a FinancialDocument as source.
- */
-export function buildApplicationContextFromDocument(
+// ---------------------------------------------------------------------------
+// Shared ApplicationContext builder
+// ---------------------------------------------------------------------------
+
+/** Parts that vary between TabularData-based and FinancialDocument-based context building. */
+interface ContextParts {
+  sourceDescription: DataDescription;
+  controlTotals: ControlTotals;
+}
+
+function buildSharedApplicationContext(
   session: SessionInfo,
-  doc: FinancialDocument,
-  transformedData: TabularData,
   template: OutputTemplate,
   sql: string,
+  parts: ContextParts,
 ): ApplicationContext {
   return {
     applicationName: "excel2budget",
@@ -330,7 +336,7 @@ export function buildApplicationContextFromDocument(
       { stepNumber: 5, name: "Review Output", description: "User reviews transformed data in IronCalc", actor: "User" },
       { stepNumber: 6, name: "Export", description: "User downloads result as CSV/Excel", actor: "User" },
     ],
-    sourceDescription: buildSourceDescriptionFromDocument(doc),
+    sourceDescription: parts.sourceDescription,
     targetDescription: buildTargetDescription(template),
     transformDescription: {
       name: "Budget Unpivot + DC Split",
@@ -345,7 +351,7 @@ export function buildApplicationContextFromDocument(
       ],
       generatedQuery: sql,
     },
-    controlTotals: computeControlTotalsFromDocument(doc, transformedData),
+    controlTotals: parts.controlTotals,
     userInstructionSteps: [
       "Upload your budget Excel file containing the Budget sheet",
       "Verify the column mapping (Entity, Account, DC, month columns)",
@@ -358,6 +364,22 @@ export function buildApplicationContextFromDocument(
       "Export the result as CSV or Excel for import into your accounting package",
     ],
   };
+}
+
+/**
+ * Build an ApplicationContext from session data using a FinancialDocument as source.
+ */
+export function buildApplicationContextFromDocument(
+  session: SessionInfo,
+  doc: FinancialDocument,
+  transformedData: TabularData,
+  template: OutputTemplate,
+  sql: string,
+): ApplicationContext {
+  return buildSharedApplicationContext(session, template, sql, {
+    sourceDescription: buildSourceDescriptionFromDocument(doc),
+    controlTotals: computeControlTotalsFromDocument(doc, transformedData),
+  });
 }
 
 /**
@@ -374,58 +396,8 @@ export function buildApplicationContext(
   template: OutputTemplate,
   sql: string,
 ): ApplicationContext {
-  return {
-    applicationName: "excel2budget",
-    configurationName: `${session.packageName} ${session.templateName} ${session.userParams.year}`,
-    configurationDate: session.configurationDate ?? null,
-    sourceSystem: {
-      name: "Excel",
-      systemType: "Spreadsheet",
-      description: `Budget file: ${session.sourceFileName}`,
-    },
-    targetSystem: {
-      name: session.packageName,
-      systemType: "Accounting Package",
-      description: `${session.templateName} import`,
-    },
-    intermediarySystems: [
-      { name: "IronCalc WASM", systemType: "Conversion Tool", description: "Spreadsheet preview" },
-      { name: "DuckDB WASM", systemType: "Conversion Tool", description: "SQL transformation engine" },
-    ],
-    processSteps: [
-      { stepNumber: 1, name: "Upload Excel File", description: "User uploads budget .xlsx file", actor: "User" },
-      { stepNumber: 2, name: "Extract Mapping", description: "System reads column mapping from Excel", actor: "System" },
-      { stepNumber: 3, name: "Set Parameters", description: "User specifies budgetcode and year", actor: "User" },
-      { stepNumber: 4, name: "Run Transformation", description: "DuckDB executes unpivot + DC split", actor: "System" },
-      { stepNumber: 5, name: "Review Output", description: "User reviews transformed data in IronCalc", actor: "User" },
-      { stepNumber: 6, name: "Export", description: "User downloads result as CSV/Excel", actor: "User" },
-    ],
+  return buildSharedApplicationContext(session, template, sql, {
     sourceDescription: buildSourceDescription(sourceData, mappingConfig),
-    targetDescription: buildTargetDescription(template),
-    transformDescription: {
-      name: "Budget Unpivot + DC Split",
-      description: "Transforms wide-format budget data into long-format accounting import",
-      steps: [
-        "Filter rows with null account values",
-        "UNPIVOT month columns into (Period, Value) rows",
-        "Extract period number from month column mapping",
-        "Split Value into Debet/Credit based on DC flag",
-        "Add fixed columns (Budgetcode, null placeholders)",
-        "Reorder columns per output template",
-      ],
-      generatedQuery: sql,
-    },
     controlTotals: computeControlTotals(sourceData, transformedData, mappingConfig),
-    userInstructionSteps: [
-      "Upload your budget Excel file containing the Budget sheet",
-      "Verify the column mapping (Entity, Account, DC, month columns)",
-      `Select the target accounting package: ${session.packageName}`,
-      `Select the template: ${session.templateName}`,
-      `Enter the budgetcode: ${session.userParams.budgetcode}`,
-      `Enter the year: ${session.userParams.year}`,
-      "Click 'Run Transformation' to execute the conversion",
-      "Review the transformed data in the output preview",
-      "Export the result as CSV or Excel for import into your accounting package",
-    ],
-  };
+  });
 }

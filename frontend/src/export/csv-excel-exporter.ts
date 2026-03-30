@@ -66,14 +66,34 @@ export function tabularDataToCsv(data: TabularData): string {
   return [header, ...rows].join("\n");
 }
 
+/** Trigger a browser download of a CSV string. */
+function downloadCsvString(csv: string, filename: string): void {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  triggerDownload(blob, filename);
+}
+
+/** Trigger a browser download of an Excel file from a 2D string array. */
+async function downloadAoaAsExcel(aoa: string[][], filename: string): Promise<void> {
+  const XLSX = await import("xlsx");
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+  const buf: ArrayBuffer = XLSX.write(wb, {
+    bookType: "xlsx",
+    type: "array",
+  });
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  triggerDownload(blob, filename);
+}
+
 /** Trigger a browser download of a CSV file. @deprecated Use downloadFinancialDocumentCsv instead. */
 export function downloadCsv(
   data: TabularData,
   filename: string = "export.csv",
 ): void {
-  const csv = tabularDataToCsv(data);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  triggerDownload(blob, filename);
+  downloadCsvString(tabularDataToCsv(data), filename);
 }
 
 // ---------------------------------------------------------------------------
@@ -92,19 +112,7 @@ export async function downloadExcel(
   data: TabularData,
   filename: string = "export.xlsx",
 ): Promise<void> {
-  const XLSX = await import("xlsx");
-  const aoa = tabularDataToAoa(data);
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
-  const buf: ArrayBuffer = XLSX.write(wb, {
-    bookType: "xlsx",
-    type: "array",
-  });
-  const blob = new Blob([buf], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-  triggerDownload(blob, filename);
+  await downloadAoaAsExcel(tabularDataToAoa(data), filename);
 }
 
 // ---------------------------------------------------------------------------
@@ -141,9 +149,7 @@ export function downloadFinancialDocumentCsv(
   doc: FinancialDocument,
   filename: string = "export.csv",
 ): void {
-  const csv = financialDocumentToCsv(doc);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  triggerDownload(blob, filename);
+  downloadCsvString(financialDocumentToCsv(doc), filename);
 }
 
 /** Trigger a browser download of an Excel file from a FinancialDocument. */
@@ -151,19 +157,7 @@ export async function downloadFinancialDocumentExcel(
   doc: FinancialDocument,
   filename: string = "export.xlsx",
 ): Promise<void> {
-  const XLSX = await import("xlsx");
-  const aoa = financialDocumentToAoa(doc);
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
-  const buf: ArrayBuffer = XLSX.write(wb, {
-    bookType: "xlsx",
-    type: "array",
-  });
-  const blob = new Blob([buf], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-  triggerDownload(blob, filename);
+  await downloadAoaAsExcel(financialDocumentToAoa(doc), filename);
 }
 
 // ---------------------------------------------------------------------------

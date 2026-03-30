@@ -45,46 +45,36 @@ export const entityArb = fc.record({
 // Line types
 // ---------------------------------------------------------------------------
 
-export const financialLineArb = fc.record({
+/** Shared shape for all financial line arbitraries. */
+const baseLineFields = {
   account: accountCodeArb,
   entity: entityCodeArb,
   period: periodArb,
   amount: amountArb,
-  line_type: lineTypeArb,
   currency: fc.constant("EUR"),
   memo: fc.option(fc.string({ maxLength: 30 }), { nil: null }),
+};
+
+export const financialLineArb = fc.record({
+  ...baseLineFields,
+  line_type: lineTypeArb,
 });
 
 export const budgetLineArb = fc.record({
-  account: accountCodeArb,
-  entity: entityCodeArb,
-  period: periodArb,
-  amount: amountArb,
+  ...baseLineFields,
   line_type: fc.constant("budget" as const),
-  currency: fc.constant("EUR"),
-  memo: fc.option(fc.string({ maxLength: 30 }), { nil: null }),
   version: fc.constant("v1"),
 });
 
 export const actualLineArb = fc.record({
-  account: accountCodeArb,
-  entity: entityCodeArb,
-  period: periodArb,
-  amount: amountArb,
+  ...baseLineFields,
   line_type: fc.constant("actual" as const),
-  currency: fc.constant("EUR"),
-  memo: fc.option(fc.string({ maxLength: 30 }), { nil: null }),
   journal_ref: fc.option(fc.string({ maxLength: 20 }), { nil: null }),
 });
 
 export const forecastLineArb = fc.record({
-  account: accountCodeArb,
-  entity: entityCodeArb,
-  period: periodArb,
-  amount: amountArb,
+  ...baseLineFields,
   line_type: fc.constant("forecast" as const),
-  currency: fc.constant("EUR"),
-  memo: fc.option(fc.string({ maxLength: 30 }), { nil: null }),
   basis: fc.constantFrom("manual", "actuals_adjusted", "budget_adjusted"),
 });
 
