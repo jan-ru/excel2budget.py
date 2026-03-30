@@ -1,0 +1,15 @@
+.git
+.hypothesis
+.pytest_cache
+.coverage
+__pycache__
+*.pyc
+node_modules
+dist
+.venv
+backend/.venv
+.kiro
+src
+docs
+*.md
+!README.md

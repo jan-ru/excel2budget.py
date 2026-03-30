@@ -107,6 +107,7 @@ See the [spec](.kiro/specs/financial-domain-model/) for requirements, design, an
 | [Configuration](docs/configuration.md) | Environment variables, 12-factor compliance, build/release/run |
 | [API Reference](docs/api.md) | REST endpoints, error handling, OpenAPI spec, metrics |
 | [Development Guide](docs/development.md) | Full setup, type generation, testing, CLI, pre-commit hooks |
+| [Deployment](docs/deployment.md) | Docker setup, Coolify/Hetzner deployment, production notes |
 | [Financial Domain Model](FinancialDomainModel.md) | Typed domain model reference — Pydantic types, Zod schemas, pure functions |
 
 ## License
