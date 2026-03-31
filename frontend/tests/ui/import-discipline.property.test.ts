@@ -99,7 +99,7 @@ describe("Property 1: Side-effect import discipline", () => {
     const paths = fileData.map((f) => f.relativePath);
     expect(paths).toContain("components/error-banner.ts");
     expect(paths).toContain("components/header.ts");
-    expect(paths).toContain("components/sheet-selector.ts");
+    expect(paths).toContain("components/selector-panel.ts");
     expect(paths).toContain("app.ts");
   });
 });
