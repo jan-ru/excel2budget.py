@@ -73,7 +73,7 @@ cd frontend && npm run dev
 # Backend (115 tests)
 cd backend && uv run pytest tests/ -v
 
-# Frontend (145 tests)
+# Frontend (170 tests)
 cd frontend && npx vitest --run
 ```
 
@@ -91,6 +91,7 @@ See the [spec](.kiro/specs/financial-domain-model/) for requirements, design, an
 
 ## Recent Changes
 
+- **UI5 Web Components Migration**: Migrated the entire frontend from plain HTML elements with inline CSS to UI5 Web Components v2.7+. Navigation uses `ui5-tabcontainer`, forms use `ui5-select`/`ui5-input`/`ui5-label`, buttons use `ui5-button`, file upload uses `ui5-file-uploader`, and error banners use `ui5-message-strip`. All inline styles removed from UI5 elements in favor of built-in theming. 10 property-based tests validate correctness properties (import discipline, no inline styles, component structure, validation states, accessibility pairing).
 - **Financial Domain Model**: Implemented the full typed domain model — immutable Pydantic types (backend), Zod schemas (frontend), pure function layer, adapter layer, and frontend pipeline migration to `FinancialDocument` IR. 17 property-based tests validate correctness properties across the stack.
 - **Header Row Selection**: Auto-detects or prompts for the header row when importing Excel files with preamble rows above the actual column headers. Progressive summary shows filename, sheet, and header row as each step resolves.
 - **IronCalc WASM fix**: Fixed WebAssembly loading in Vite dev mode by excluding `@ironcalc/wasm` from dependency pre-bundling.

@@ -66,7 +66,7 @@ cd backend
 uv run pytest tests/ -v
 ```
 
-Frontend (145 tests — fast-check property tests + integration):
+Frontend (170 tests — fast-check property tests + integration):
 
 ```bash
 cd frontend

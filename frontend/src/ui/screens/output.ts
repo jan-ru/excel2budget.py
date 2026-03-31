@@ -4,6 +4,8 @@
  * Requirements: 10.1, 11.1, 11.2, 11.3, 14.1
  */
 
+import "@ui5/webcomponents/dist/Button.js";
+
 import type { ScreenContext } from "../app";
 import { showError } from "../components/error-banner";
 import { loadData, renderToElement } from "../../engine/ironcalc-engine";
@@ -83,11 +85,10 @@ export async function render(ctx: ScreenContext): Promise<void> {
   };
 }
 
-function exportButton(text: string, onClick: () => Promise<void>): HTMLButtonElement {
-  const btn = document.createElement("button");
+function exportButton(text: string, onClick: () => Promise<void>): HTMLElement {
+  const btn = document.createElement("ui5-button");
   btn.textContent = text;
-  btn.style.cssText =
-    "padding:8px 16px;border:1px solid #d1d5db;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;";
+  btn.setAttribute("design", "Default");
   btn.addEventListener("click", () => onClick());
   return btn;
 }

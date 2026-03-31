@@ -1,7 +1,13 @@
 /**
  * Configuration screen: package/template selection and user parameter inputs.
- * Requirements: 14.1, 14.3
+ * Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 7.10, 11.1, 13.2
  */
+
+import "@ui5/webcomponents/dist/Select.js";
+import "@ui5/webcomponents/dist/Option.js";
+import "@ui5/webcomponents/dist/Input.js";
+import "@ui5/webcomponents/dist/Label.js";
+import "@ui5/webcomponents/dist/Button.js";
 
 import type { ScreenContext } from "../app";
 import { showError, clearError } from "../components/error-banner";
@@ -19,49 +25,67 @@ export async function render(ctx: ScreenContext): Promise<void> {
   form.appendChild(heading);
 
   // --- Package select ---
-  const pkgLabel = label("Package");
-  const pkgSelect = document.createElement("select");
-  pkgSelect.setAttribute("aria-label", "Package");
-  pkgSelect.style.cssText = selectStyle();
-  pkgSelect.innerHTML = '<option value="">Loading…</option>';
+  const pkgLabel = document.createElement("ui5-label");
+  pkgLabel.textContent = "Package";
+  pkgLabel.setAttribute("for", "cfg-package");
   form.appendChild(pkgLabel);
+
+  const pkgSelect = document.createElement("ui5-select");
+  pkgSelect.id = "cfg-package";
+  pkgSelect.setAttribute("aria-label", "Package");
+  const pkgPlaceholder = document.createElement("ui5-option");
+  pkgPlaceholder.setAttribute("value", "");
+  pkgPlaceholder.textContent = "Loading\u2026";
+  pkgPlaceholder.setAttribute("selected", "");
+  pkgSelect.appendChild(pkgPlaceholder);
   form.appendChild(pkgSelect);
 
   // --- Template select ---
-  const tplLabel = label("Template");
-  const tplSelect = document.createElement("select");
-  tplSelect.setAttribute("aria-label", "Template");
-  tplSelect.style.cssText = selectStyle();
-  tplSelect.disabled = true;
-  tplSelect.innerHTML = '<option value="">Select a package first</option>';
+  const tplLabel = document.createElement("ui5-label");
+  tplLabel.textContent = "Template";
+  tplLabel.setAttribute("for", "cfg-template");
   form.appendChild(tplLabel);
+
+  const tplSelect = document.createElement("ui5-select");
+  tplSelect.id = "cfg-template";
+  tplSelect.setAttribute("aria-label", "Template");
+  tplSelect.setAttribute("disabled", "");
+  const tplPlaceholder = document.createElement("ui5-option");
+  tplPlaceholder.setAttribute("value", "");
+  tplPlaceholder.textContent = "Select a package first";
+  tplPlaceholder.setAttribute("selected", "");
+  tplSelect.appendChild(tplPlaceholder);
   form.appendChild(tplSelect);
 
   // --- Budgetcode ---
-  const bcLabel = label("Budgetcode");
-  const bcInput = document.createElement("input");
-  bcInput.type = "text";
-  bcInput.placeholder = "e.g. BC001";
-  bcInput.setAttribute("aria-label", "Budgetcode");
-  bcInput.style.cssText = inputStyle();
+  const bcLabel = document.createElement("ui5-label");
+  bcLabel.textContent = "Budgetcode";
+  bcLabel.setAttribute("for", "cfg-budgetcode");
   form.appendChild(bcLabel);
+
+  const bcInput = document.createElement("ui5-input");
+  bcInput.id = "cfg-budgetcode";
+  bcInput.setAttribute("placeholder", "e.g. BC001");
+  bcInput.setAttribute("aria-label", "Budgetcode");
   form.appendChild(bcInput);
 
   // --- Year ---
-  const yrLabel = label("Year");
-  const yrInput = document.createElement("input");
-  yrInput.type = "number";
-  yrInput.placeholder = String(new Date().getFullYear());
-  yrInput.setAttribute("aria-label", "Year");
-  yrInput.style.cssText = inputStyle();
+  const yrLabel = document.createElement("ui5-label");
+  yrLabel.textContent = "Year";
+  yrLabel.setAttribute("for", "cfg-year");
   form.appendChild(yrLabel);
+
+  const yrInput = document.createElement("ui5-input");
+  yrInput.id = "cfg-year";
+  yrInput.setAttribute("type", "Number");
+  yrInput.setAttribute("placeholder", String(new Date().getFullYear()));
+  yrInput.setAttribute("aria-label", "Year");
   form.appendChild(yrInput);
 
   // --- Apply button ---
-  const applyBtn = document.createElement("button");
+  const applyBtn = document.createElement("ui5-button");
   applyBtn.textContent = "Apply Configuration";
-  applyBtn.style.cssText =
-    "margin-top:16px;padding:10px 20px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;width:100%;";
+  applyBtn.setAttribute("design", "Emphasized");
   form.appendChild(applyBtn);
 
   contentEl.appendChild(form);
@@ -72,19 +96,30 @@ export async function render(ctx: ScreenContext): Promise<void> {
     showError(errorEl, `Failed to load packages: ${pkgResult.error}`);
     return;
   }
-  pkgSelect.innerHTML = '<option value="">Select package…</option>';
+  pkgSelect.innerHTML = "";
+  const pkgDefaultOpt = document.createElement("ui5-option");
+  pkgDefaultOpt.setAttribute("value", "");
+  pkgDefaultOpt.textContent = "Select package\u2026";
+  pkgDefaultOpt.setAttribute("selected", "");
+  pkgSelect.appendChild(pkgDefaultOpt);
   for (const p of pkgResult.data) {
-    const opt = document.createElement("option");
-    opt.value = p;
+    const opt = document.createElement("ui5-option");
+    opt.setAttribute("value", p);
     opt.textContent = p;
     pkgSelect.appendChild(opt);
   }
 
   // --- On package change, load templates ---
-  pkgSelect.addEventListener("change", async () => {
-    const pkg = pkgSelect.value;
-    tplSelect.innerHTML = '<option value="">Loading…</option>';
-    tplSelect.disabled = true;
+  pkgSelect.addEventListener("change", async (e: Event) => {
+    const selectedOption = (e as CustomEvent).detail?.selectedOption;
+    const pkg = selectedOption?.getAttribute?.("value") ?? selectedOption?.value ?? "";
+    tplSelect.innerHTML = "";
+    const loadingOpt = document.createElement("ui5-option");
+    loadingOpt.setAttribute("value", "");
+    loadingOpt.textContent = "Loading\u2026";
+    loadingOpt.setAttribute("selected", "");
+    tplSelect.appendChild(loadingOpt);
+    tplSelect.setAttribute("disabled", "");
     if (!pkg) return;
 
     const tplResult = await getTemplates(pkg);
@@ -92,34 +127,69 @@ export async function render(ctx: ScreenContext): Promise<void> {
       showError(errorEl, `Failed to load templates: ${tplResult.error}`);
       return;
     }
-    tplSelect.innerHTML = '<option value="">Select template…</option>';
+    tplSelect.innerHTML = "";
+    const tplDefaultOpt = document.createElement("ui5-option");
+    tplDefaultOpt.setAttribute("value", "");
+    tplDefaultOpt.textContent = "Select template\u2026";
+    tplDefaultOpt.setAttribute("selected", "");
+    tplSelect.appendChild(tplDefaultOpt);
     for (const t of tplResult.data) {
-      const opt = document.createElement("option");
-      opt.value = t;
+      const opt = document.createElement("ui5-option");
+      opt.setAttribute("value", t);
       opt.textContent = t;
       tplSelect.appendChild(opt);
     }
-    tplSelect.disabled = false;
+    tplSelect.removeAttribute("disabled");
   });
+
+  // --- Helper to read selected value from ui5-select ---
+  function getSelectValue(select: HTMLElement): string {
+    const selected = select.querySelector("ui5-option[selected]:not([disabled])") as HTMLElement | null;
+    return selected?.getAttribute("value") ?? "";
+  }
 
   // --- Apply ---
   applyBtn.addEventListener("click", async () => {
     clearError(errorEl);
-    const pkg = pkgSelect.value;
-    const tpl = tplSelect.value;
-    const bc = bcInput.value.trim();
-    const yr = parseInt(yrInput.value, 10);
 
-    if (!pkg || !tpl) {
-      showError(errorEl, "Please select a package and template.");
-      return;
+    // Reset value states
+    pkgSelect.setAttribute("value-state", "None");
+    tplSelect.setAttribute("value-state", "None");
+    bcInput.setAttribute("value-state", "None");
+    yrInput.setAttribute("value-state", "None");
+
+    const pkg = getSelectValue(pkgSelect);
+    const tpl = getSelectValue(tplSelect);
+    const bc = (bcInput.getAttribute("value") ?? "").trim();
+    const yr = parseInt(yrInput.getAttribute("value") ?? "", 10);
+
+    let hasError = false;
+
+    if (!pkg) {
+      pkgSelect.setAttribute("value-state", "Negative");
+      hasError = true;
+    }
+    if (!tpl) {
+      tplSelect.setAttribute("value-state", "Negative");
+      hasError = true;
     }
     if (!bc) {
-      showError(errorEl, "Budgetcode is required.");
-      return;
+      bcInput.setAttribute("value-state", "Negative");
+      hasError = true;
     }
     if (!yr || yr <= 0) {
-      showError(errorEl, "Year must be a positive number.");
+      yrInput.setAttribute("value-state", "Negative");
+      hasError = true;
+    }
+
+    if (hasError) {
+      if (!pkg || !tpl) {
+        showError(errorEl, "Please select a package and template.");
+      } else if (!bc) {
+        showError(errorEl, "Budgetcode is required.");
+      } else {
+        showError(errorEl, "Year must be a positive number.");
+      }
       return;
     }
 
@@ -131,18 +201,4 @@ export async function render(ctx: ScreenContext): Promise<void> {
     orchestrator.setParams(bc, yr);
     navigate("transform");
   });
-}
-
-// --- Helpers ---
-function label(text: string): HTMLElement {
-  const el = document.createElement("label");
-  el.textContent = text;
-  el.style.cssText = "display:block;margin-top:12px;margin-bottom:4px;font-size:13px;font-weight:500;color:#374151;";
-  return el;
-}
-function selectStyle(): string {
-  return "width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:14px;";
-}
-function inputStyle(): string {
-  return "width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:14px;box-sizing:border-box;";
 }

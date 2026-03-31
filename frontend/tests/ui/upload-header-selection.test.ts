@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { render } from "../../src/ui/screens/upload";
 import type { ScreenContext, ScreenName } from "../../src/ui/app";
 import type { PipelineOrchestrator } from "../../src/pipeline/orchestrator";
+import { registerAllUI5Stubs } from "./helpers/ui5-stub";
+
+beforeAll(() => {
+  registerAllUI5Stubs();
+});
 
 /** Helper to build a minimal ScreenContext with a mock orchestrator. */
 function createCtx(overrides: Partial<PipelineOrchestrator> = {}) {
@@ -29,17 +34,31 @@ function createCtx(overrides: Partial<PipelineOrchestrator> = {}) {
   return { ctx, contentEl, errorEl, navigate, orchestrator };
 }
 
-/** Simulate selecting a file on the input element. */
+/** Simulate selecting a file on the ui5-file-uploader element. */
 async function pickFile(contentEl: HTMLElement): Promise<void> {
   const input = contentEl.querySelector(
-    'input[type="file"]',
-  ) as HTMLInputElement;
+    "ui5-file-uploader",
+  ) as HTMLElement;
   const file = new File(["data"], "budget-2025.xlsx", {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
-  Object.defineProperty(input, "files", { value: [file], writable: false });
-  input.dispatchEvent(new Event("change"));
+  const fileList = [file] as unknown as FileList;
+  input.dispatchEvent(new CustomEvent("change", { detail: { files: fileList } }));
   await vi.waitFor(() => {});
+}
+
+/** Simulate a UI5 select change event and mark option as selected. */
+function selectUI5Option(select: Element, value: string) {
+  const placeholder = select.querySelector("ui5-option[disabled]");
+  placeholder?.removeAttribute("selected");
+  const opt = Array.from(select.querySelectorAll("ui5-option")).find(
+    (o) => o.getAttribute("value") === value,
+  );
+  opt?.setAttribute("selected", "");
+  const fakeOption = { getAttribute: () => value, value };
+  select.dispatchEvent(
+    new CustomEvent("change", { detail: { selectedOption: fakeOption }, bubbles: true }),
+  );
 }
 
 describe("Upload Screen — header row selection integration", () => {
@@ -68,11 +87,11 @@ describe("Upload Screen — header row selection integration", () => {
     const selector = contentEl.querySelector("[data-header-selector]");
     expect(selector).not.toBeNull();
 
-    // Verify candidate rows are rendered as options
-    const options = selector!.querySelectorAll("option:not([disabled])");
+    // Verify candidate rows are rendered as ui5-option elements
+    const options = selector!.querySelectorAll("ui5-option:not([disabled])");
     expect(options.length).toBe(2);
-    expect((options[0] as HTMLOptionElement).textContent).toContain("Row 3");
-    expect((options[1] as HTMLOptionElement).textContent).toContain("Row 6");
+    expect(options[0].textContent).toContain("Row 3");
+    expect(options[1].textContent).toContain("Row 6");
   });
 
   it("shows Header_Row_Selector after sheet selection when importWithSheet returns HeaderSelectionNeeded", async () => {
@@ -97,14 +116,13 @@ describe("Upload Screen — header row selection integration", () => {
 
     // Select sheet and confirm
     const sheetSelector = contentEl.querySelector("[data-sheet-selector]")!;
-    const select = sheetSelector.querySelector("select") as HTMLSelectElement;
+    const select = sheetSelector.querySelector("ui5-select")!;
     const confirmBtn = sheetSelector.querySelector(
       '[aria-label="Confirm sheet selection"]',
-    ) as HTMLButtonElement;
+    ) as HTMLElement;
 
-    select.value = "Data";
-    select.dispatchEvent(new Event("change"));
-    confirmBtn.dispatchEvent(new Event("click"));
+    selectUI5Option(select, "Data");
+    confirmBtn.click();
 
     await vi.waitFor(() => {
       expect(orchestrator.importWithSheet).toHaveBeenCalledWith("Data");
@@ -136,14 +154,13 @@ describe("Upload Screen — header row selection integration", () => {
     await pickFile(contentEl);
 
     const selector = contentEl.querySelector("[data-header-selector]")!;
-    const select = selector.querySelector("select") as HTMLSelectElement;
+    const select = selector.querySelector("ui5-select")!;
     const confirmBtn = selector.querySelector(
       '[aria-label="Confirm header row selection"]',
-    ) as HTMLButtonElement;
+    ) as HTMLElement;
 
-    select.value = "2";
-    select.dispatchEvent(new Event("change"));
-    confirmBtn.dispatchEvent(new Event("click"));
+    selectUI5Option(select, "2");
+    confirmBtn.click();
 
     await vi.waitFor(() => {
       expect(orchestrator.importWithHeaderRow).toHaveBeenCalledWith(2);
@@ -176,24 +193,20 @@ describe("Upload Screen — header row selection integration", () => {
     await pickFile(contentEl);
 
     const selector = contentEl.querySelector("[data-header-selector]")!;
-    const select = selector.querySelector("select") as HTMLSelectElement;
+    const select = selector.querySelector("ui5-select")!;
     const confirmBtn = selector.querySelector(
       '[aria-label="Confirm header row selection"]',
-    ) as HTMLButtonElement;
+    ) as HTMLElement;
 
-    select.value = "2";
-    select.dispatchEvent(new Event("change"));
-    confirmBtn.dispatchEvent(new Event("click"));
+    selectUI5Option(select, "2");
+    confirmBtn.click();
 
     await vi.waitFor(() => {
       expect(orchestrator.importWithHeaderRow).toHaveBeenCalledWith(2);
     });
 
-    // Error should be shown
     expect(errorEl.textContent).toContain("Missing columns: DC");
-    // Header selector should still be visible
     expect(contentEl.querySelector("[data-header-selector]")).not.toBeNull();
-    // Should NOT navigate
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -212,28 +225,20 @@ describe("Upload Screen — header row selection integration", () => {
     await render(ctx);
     await pickFile(contentEl);
 
-    // Header selector should be visible
     expect(contentEl.querySelector("[data-header-selector]")).not.toBeNull();
-    // Summary should show file and sheet
     const summary = contentEl.querySelector("[data-progress-summary]") as HTMLElement;
     expect(summary.textContent).toContain("budget-2025.xlsx");
 
-    // Click cancel
     const cancelBtn = contentEl.querySelector(
       '[aria-label="Cancel header row selection"]',
-    ) as HTMLButtonElement;
-    cancelBtn.dispatchEvent(new Event("click"));
+    ) as HTMLElement;
+    cancelBtn.click();
 
-    // Orchestrator should release pending state
     expect(orchestrator.cancelPendingImport).toHaveBeenCalledOnce();
-    // Header selector should be removed
     expect(contentEl.querySelector("[data-header-selector]")).toBeNull();
-    // Error area should be cleared
     expect(errorEl.innerHTML).toBe("");
-    // File input should be cleared
-    const input = contentEl.querySelector('input[type="file"]') as HTMLInputElement;
-    expect(input.value).toBe("");
-    // Summary should be cleared
+    const input = contentEl.querySelector("ui5-file-uploader") as HTMLElement;
+    expect((input as unknown as HTMLInputElement).value).toBe("");
     expect(summary.style.display).toBe("none");
     expect(summary.textContent).toBe("");
   });
@@ -305,14 +310,13 @@ describe("Upload Screen — progressive summary", () => {
     await pickFile(contentEl);
 
     const selector = contentEl.querySelector("[data-header-selector]")!;
-    const select = selector.querySelector("select") as HTMLSelectElement;
+    const select = selector.querySelector("ui5-select")!;
     const confirmBtn = selector.querySelector(
       '[aria-label="Confirm header row selection"]',
-    ) as HTMLButtonElement;
+    ) as HTMLElement;
 
-    select.value = "4";
-    select.dispatchEvent(new Event("change"));
-    confirmBtn.dispatchEvent(new Event("click"));
+    selectUI5Option(select, "4");
+    confirmBtn.click();
 
     await vi.waitFor(() => {
       expect(orchestrator.importWithHeaderRow).toHaveBeenCalledWith(4);
@@ -339,8 +343,8 @@ describe("Upload Screen — progressive summary", () => {
 
     const cancelBtn = contentEl.querySelector(
       '[aria-label="Cancel header row selection"]',
-    ) as HTMLButtonElement;
-    cancelBtn.dispatchEvent(new Event("click"));
+    ) as HTMLElement;
+    cancelBtn.click();
 
     expect(summary.style.display).toBe("none");
     expect(summary.textContent).toBe("");

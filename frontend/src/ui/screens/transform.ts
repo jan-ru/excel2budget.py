@@ -1,8 +1,10 @@
 /**
  * Transform screen: trigger transformation via Pipeline_Orchestrator.runTransform.
  * Display success/error result.
- * Requirements: 8.3, 14.1
+ * Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 11.1, 13.3
  */
+
+import "@ui5/webcomponents/dist/Button.js";
 
 import type { ScreenContext } from "../app";
 import { showError, clearError } from "../components/error-banner";
@@ -30,14 +32,11 @@ export async function render(ctx: ScreenContext): Promise<void> {
       `using ${orchestrator.template.packageName}/${orchestrator.template.templateName}.`;
   }
 
-  const runBtn = document.createElement("button");
+  const runBtn = document.createElement("ui5-button");
   runBtn.textContent = "Run Transformation";
-  runBtn.disabled = !orchestrator.sourceData || !orchestrator.template || !orchestrator.userParams;
-  runBtn.style.cssText =
-    "padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;";
-  if (runBtn.disabled) {
-    runBtn.style.opacity = "0.5";
-    runBtn.style.cursor = "not-allowed";
+  runBtn.setAttribute("design", "Emphasized");
+  if (!orchestrator.sourceData || !orchestrator.template || !orchestrator.userParams) {
+    runBtn.setAttribute("disabled", "");
   }
 
   const status = document.createElement("p");
@@ -45,14 +44,14 @@ export async function render(ctx: ScreenContext): Promise<void> {
 
   runBtn.addEventListener("click", async () => {
     clearError(errorEl);
-    runBtn.disabled = true;
+    runBtn.setAttribute("disabled", "");
     status.textContent = "Transforming…";
 
     const result = await orchestrator.runTransform();
     if (!result.ok) {
       status.textContent = "";
       showError(errorEl, result.error);
-      runBtn.disabled = false;
+      runBtn.removeAttribute("disabled");
       return;
     }
 

@@ -1,7 +1,11 @@
 /**
  * Header row selector component for choosing which row contains column headers.
- * Requirements: 3.2, 3.3, 3.4, 3.5, 3.6
+ * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 11.1
  */
+
+import "@ui5/webcomponents/dist/Select.js";
+import "@ui5/webcomponents/dist/Option.js";
+import "@ui5/webcomponents/dist/Button.js";
 
 /** Options for creating a header row selector component. */
 export interface HeaderRowSelectorOptions {
@@ -45,21 +49,19 @@ export function createHeaderRowSelector(
         );
 
   // Dropdown
-  const select = document.createElement("select");
+  const select = document.createElement("ui5-select");
   select.setAttribute("aria-label", "Header row selection");
-  select.style.cssText =
-    "padding:6px 10px;border:1px solid #d1d5db;border-radius:4px;font-size:14px;min-width:200px;";
 
-  const placeholder = document.createElement("option");
+  const placeholder = document.createElement("ui5-option");
   placeholder.textContent = "Select a header row\u2026";
-  placeholder.value = "";
-  placeholder.disabled = true;
-  placeholder.selected = true;
+  placeholder.setAttribute("value", "");
+  placeholder.setAttribute("disabled", "");
+  placeholder.setAttribute("selected", "");
   select.appendChild(placeholder);
 
   for (const idx of indices) {
-    const opt = document.createElement("option");
-    opt.value = String(idx);
+    const opt = document.createElement("ui5-option");
+    opt.setAttribute("value", String(idx));
     const row = idx < rawPreview.length ? rawPreview[idx] : [];
     const preview = Array.isArray(row) ? previewCells(row) : "";
     opt.textContent = `Row ${idx + 1}: ${preview}`;
@@ -70,27 +72,33 @@ export function createHeaderRowSelector(
   const btnRow = document.createElement("div");
   btnRow.style.cssText = "display:flex;gap:8px;";
 
-  const confirmBtn = document.createElement("button");
+  const confirmBtn = document.createElement("ui5-button");
   confirmBtn.textContent = "Confirm";
-  confirmBtn.disabled = true;
+  confirmBtn.setAttribute("disabled", "");
   confirmBtn.setAttribute("aria-label", "Confirm header row selection");
-  confirmBtn.style.cssText =
-    "padding:6px 14px;border:1px solid #d1d5db;border-radius:4px;background:#2563eb;color:#fff;cursor:pointer;font-size:13px;";
+  confirmBtn.setAttribute("design", "Emphasized");
 
-  const cancelBtn = document.createElement("button");
+  const cancelBtn = document.createElement("ui5-button");
   cancelBtn.textContent = "Cancel";
   cancelBtn.setAttribute("aria-label", "Cancel header row selection");
-  cancelBtn.style.cssText =
-    "padding:6px 14px;border:1px solid #d1d5db;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;";
+  cancelBtn.setAttribute("design", "Transparent");
 
   // Enable confirm when a real row is selected
-  select.addEventListener("change", () => {
-    confirmBtn.disabled = select.value === "";
+  select.addEventListener("change", (e: Event) => {
+    const selectedOption = (e as CustomEvent).detail?.selectedOption;
+    const value = selectedOption?.getAttribute?.("value") ?? selectedOption?.value ?? "";
+    if (value) {
+      confirmBtn.removeAttribute("disabled");
+    } else {
+      confirmBtn.setAttribute("disabled", "");
+    }
   });
 
   confirmBtn.addEventListener("click", () => {
-    if (select.value !== "") {
-      onConfirm(Number(select.value));
+    const selectedOpt = select.querySelector("ui5-option[selected]:not([disabled])") as HTMLElement | null;
+    const value = selectedOpt?.getAttribute("value") ?? "";
+    if (value !== "") {
+      onConfirm(Number(value));
     }
   });
 

@@ -6,6 +6,8 @@
  * Requirements: 3.1, 4.1, 5.1, 5.2, 5.3, 5.4, 5.5, 6.2, 7.1, 7.3, 14.1
  */
 
+import "@ui5/webcomponents/dist/FileUploader.js";
+
 import type { ScreenContext } from "../app";
 import { showError, clearError } from "../components/error-banner";
 import { isSheetSelectionNeeded, isHeaderSelectionNeeded } from "../../pipeline/orchestrator";
@@ -48,11 +50,9 @@ export async function render(ctx: ScreenContext): Promise<void> {
   desc.textContent = "Select an Excel (.xlsx) budget file to begin.";
   desc.style.cssText = "color:#6b7280;margin-bottom:24px;font-size:14px;";
 
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".xlsx";
+  const input = document.createElement("ui5-file-uploader");
+  input.setAttribute("accept", ".xlsx");
   input.setAttribute("aria-label", "Upload Excel file");
-  input.style.cssText = "margin-bottom:16px;";
 
   const status = document.createElement("p");
   status.style.cssText = "font-size:14px;color:#374151;";
@@ -82,7 +82,7 @@ export async function render(ctx: ScreenContext): Promise<void> {
   function resetToInitial(): void {
     clearError(errorEl);
     status.textContent = "";
-    input.value = "";
+    (input as unknown as HTMLInputElement).value = "";
     clearSummary();
     // Remove sheet selector if present
     const sheetSel = wrapper.querySelector("[data-sheet-selector]");
@@ -180,8 +180,8 @@ export async function render(ctx: ScreenContext): Promise<void> {
     wrapper.appendChild(selectorEl);
   }
 
-  input.addEventListener("change", async () => {
-    const file = input.files?.[0];
+  input.addEventListener("change", async (e: Event) => {
+    const file = ((e as CustomEvent).detail?.files as FileList)?.[0];
     if (!file) return;
 
     clearError(errorEl);

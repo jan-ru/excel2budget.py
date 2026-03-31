@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { render } from "../../src/ui/screens/upload";
 import type { ScreenContext, ScreenName } from "../../src/ui/app";
 import type { PipelineOrchestrator } from "../../src/pipeline/orchestrator";
+import { registerAllUI5Stubs } from "./helpers/ui5-stub";
+
+beforeAll(() => {
+  registerAllUI5Stubs();
+});
 
 /** Helper to build a minimal ScreenContext with a mock orchestrator. */
 function createCtx(overrides: Partial<PipelineOrchestrator> = {}) {
@@ -28,19 +33,31 @@ function createCtx(overrides: Partial<PipelineOrchestrator> = {}) {
   return { ctx, contentEl, errorEl, navigate, orchestrator };
 }
 
-/** Simulate selecting a file on the input element. */
+/** Simulate selecting a file on the ui5-file-uploader element. */
 async function pickFile(contentEl: HTMLElement): Promise<void> {
   const input = contentEl.querySelector(
-    'input[type="file"]',
-  ) as HTMLInputElement;
-  // Provide a fake file via the files property
+    "ui5-file-uploader",
+  ) as HTMLElement;
   const file = new File(["data"], "test.xlsx", {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
-  Object.defineProperty(input, "files", { value: [file], writable: false });
-  input.dispatchEvent(new Event("change"));
-  // Let async handler settle
+  const fileList = [file] as unknown as FileList;
+  input.dispatchEvent(new CustomEvent("change", { detail: { files: fileList } }));
   await vi.waitFor(() => {});
+}
+
+/** Simulate a UI5 select change event and mark option as selected. */
+function selectUI5Option(select: Element, value: string) {
+  const placeholder = select.querySelector("ui5-option[disabled]");
+  placeholder?.removeAttribute("selected");
+  const opt = Array.from(select.querySelectorAll("ui5-option")).find(
+    (o) => o.getAttribute("value") === value,
+  );
+  opt?.setAttribute("selected", "");
+  const fakeOption = { getAttribute: () => value, value };
+  select.dispatchEvent(
+    new CustomEvent("change", { detail: { selectedOption: fakeOption }, bubbles: true }),
+  );
 }
 
 describe("Upload Screen — sheet selection integration", () => {
@@ -61,11 +78,11 @@ describe("Upload Screen — sheet selection integration", () => {
     const selector = contentEl.querySelector("[data-sheet-selector]");
     expect(selector).not.toBeNull();
 
-    // Verify sheet names are rendered as options
-    const options = selector!.querySelectorAll("option:not([disabled])");
+    // Verify sheet names are rendered as ui5-option elements
+    const options = selector!.querySelectorAll("ui5-option:not([disabled])");
     expect(options.length).toBe(2);
-    expect((options[0] as HTMLOptionElement).value).toBe("Sales");
-    expect((options[1] as HTMLOptionElement).value).toBe("Expenses");
+    expect(options[0].getAttribute("value")).toBe("Sales");
+    expect(options[1].getAttribute("value")).toBe("Expenses");
   });
 
   it("navigates to preview on successful sheet selection", async () => {
@@ -82,23 +99,19 @@ describe("Upload Screen — sheet selection integration", () => {
     await render(ctx);
     await pickFile(contentEl);
 
-    // Select a sheet and confirm
     const selector = contentEl.querySelector("[data-sheet-selector]")!;
-    const select = selector.querySelector("select") as HTMLSelectElement;
+    const select = selector.querySelector("ui5-select")!;
     const confirmBtn = selector.querySelector(
       '[aria-label="Confirm sheet selection"]',
-    ) as HTMLButtonElement;
+    ) as HTMLElement;
 
-    select.value = "Sales";
-    select.dispatchEvent(new Event("change"));
-    confirmBtn.dispatchEvent(new Event("click"));
+    selectUI5Option(select, "Sales");
+    confirmBtn.click();
 
-    // Let async handler settle
     await vi.waitFor(() => {
       expect(orchestrator.importWithSheet).toHaveBeenCalledWith("Sales");
     });
 
-    // Navigate after timeout
     vi.advanceTimersByTime(700);
     expect(navigate).toHaveBeenCalledWith("preview");
   });
@@ -117,26 +130,21 @@ describe("Upload Screen — sheet selection integration", () => {
     await render(ctx);
     await pickFile(contentEl);
 
-    // Select a sheet and confirm
     const selector = contentEl.querySelector("[data-sheet-selector]")!;
-    const select = selector.querySelector("select") as HTMLSelectElement;
+    const select = selector.querySelector("ui5-select")!;
     const confirmBtn = selector.querySelector(
       '[aria-label="Confirm sheet selection"]',
-    ) as HTMLButtonElement;
+    ) as HTMLElement;
 
-    select.value = "Sales";
-    select.dispatchEvent(new Event("change"));
-    confirmBtn.dispatchEvent(new Event("click"));
+    selectUI5Option(select, "Sales");
+    confirmBtn.click();
 
     await vi.waitFor(() => {
       expect(orchestrator.importWithSheet).toHaveBeenCalledWith("Sales");
     });
 
-    // Error should be shown
     expect(errorEl.textContent).toContain("Sheet 'Sales' is empty");
-    // Selector should still be visible
     expect(contentEl.querySelector("[data-sheet-selector]")).not.toBeNull();
-    // Should NOT navigate
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -150,25 +158,19 @@ describe("Upload Screen — sheet selection integration", () => {
     await render(ctx);
     await pickFile(contentEl);
 
-    // Selector should be visible
     expect(contentEl.querySelector("[data-sheet-selector]")).not.toBeNull();
 
-    // Click cancel
     const cancelBtn = contentEl.querySelector(
       '[aria-label="Cancel sheet selection"]',
-    ) as HTMLButtonElement;
-    cancelBtn.dispatchEvent(new Event("click"));
+    ) as HTMLElement;
+    cancelBtn.click();
 
-    // Orchestrator should release workbook
     expect(orchestrator.cancelPendingImport).toHaveBeenCalledOnce();
-    // Selector should be removed
     expect(contentEl.querySelector("[data-sheet-selector]")).toBeNull();
-    // Error area should be cleared
     expect(errorEl.innerHTML).toBe("");
-    // File input should be cleared
     const input = contentEl.querySelector(
-      'input[type="file"]',
-    ) as HTMLInputElement;
-    expect(input.value).toBe("");
+      "ui5-file-uploader",
+    ) as HTMLElement;
+    expect((input as unknown as HTMLInputElement).value).toBe("");
   });
 });

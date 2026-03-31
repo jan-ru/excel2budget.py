@@ -1,8 +1,9 @@
 /**
  * Header component: current date display (YYYY-MM-DD) + "Download as PDF" action.
- * Requirements: 14.2
+ * Requirements: 2.1, 2.2, 2.3, 11.1
  */
 
+import "@ui5/webcomponents/dist/Button.js";
 import { downloadPdf } from "../../export/pdf-exporter";
 import type { PDFExportOptions } from "../../export/pdf-exporter";
 
@@ -40,10 +41,9 @@ export function createHeader(options: HeaderOptions = {}): HTMLElement {
   left.appendChild(title);
   left.appendChild(dateEl);
 
-  const pdfBtn = document.createElement("button");
+  const pdfBtn = document.createElement("ui5-button");
   pdfBtn.textContent = "Download as PDF";
-  pdfBtn.style.cssText =
-    "padding:6px 14px;border:1px solid #d1d5db;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;";
+  pdfBtn.setAttribute("design", "Default");
   pdfBtn.addEventListener("click", async () => {
     const opts = options.getPdfOptions?.();
     if (opts) {

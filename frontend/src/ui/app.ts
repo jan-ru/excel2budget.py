@@ -7,6 +7,9 @@
  * Requirements: 14.1
  */
 
+import "@ui5/webcomponents/dist/TabContainer.js";
+import "@ui5/webcomponents/dist/Tab.js";
+
 import { PipelineOrchestrator } from "../pipeline/orchestrator";
 import { createHeader } from "./components/header";
 import type { PDFExportOptions } from "../export/pdf-exporter";
@@ -70,23 +73,26 @@ export function mountApp(root: HTMLElement): void {
 
   const header = createHeader({ getPdfOptions: () => getPdfOptions() });
 
-  const nav = document.createElement("nav");
-  nav.setAttribute("role", "navigation");
-  nav.setAttribute("aria-label", "Main navigation");
-  nav.style.cssText =
-    "display:flex;gap:0;border-bottom:1px solid #e5e7eb;background:#fafafa;";
+  const tabContainer = document.createElement("ui5-tabcontainer");
+  tabContainer.setAttribute("fixed", "");
 
-  const navButtons: Record<string, HTMLButtonElement> = {};
+  const tabs: Record<string, HTMLElement> = {};
   for (const name of Object.keys(SCREEN_LABELS) as ScreenName[]) {
-    const btn = document.createElement("button");
-    btn.textContent = SCREEN_LABELS[name];
-    btn.dataset.screen = name;
-    btn.style.cssText =
-      "padding:10px 18px;border:none;background:transparent;cursor:pointer;font-size:14px;border-bottom:2px solid transparent;";
-    btn.addEventListener("click", () => navigate(name));
-    navButtons[name] = btn;
-    nav.appendChild(btn);
+    const tab = document.createElement("ui5-tab");
+    tab.setAttribute("text", SCREEN_LABELS[name]);
+    tab.dataset.screen = name;
+    if (name === currentScreen) {
+      tab.setAttribute("selected", "");
+    }
+    tabs[name] = tab;
+    tabContainer.appendChild(tab);
   }
+
+  tabContainer.addEventListener("tab-select", (e) => {
+    const selectedTab = (e as CustomEvent).detail.tab as HTMLElement;
+    const screen = selectedTab.dataset.screen as ScreenName | undefined;
+    if (screen) navigate(screen);
+  });
 
   const errorEl = document.createElement("div");
   errorEl.id = "app-error";
@@ -96,23 +102,21 @@ export function mountApp(root: HTMLElement): void {
   contentEl.style.cssText = "flex:1;overflow:auto;padding:16px;";
 
   root.appendChild(header);
-  root.appendChild(nav);
+  root.appendChild(tabContainer);
   root.appendChild(errorEl);
   root.appendChild(contentEl);
-
-  function updateNavHighlight(): void {
-    for (const [name, btn] of Object.entries(navButtons)) {
-      const active = name === currentScreen;
-      btn.style.borderBottomColor = active ? "#2563eb" : "transparent";
-      btn.style.fontWeight = active ? "600" : "400";
-      btn.style.color = active ? "#2563eb" : "#374151";
-    }
-  }
 
   async function navigate(screen: ScreenName): Promise<void> {
     currentScreen = screen;
     getPdfOptions = () => null;
-    updateNavHighlight();
+    // Update tab selection — UI5 handles active styling
+    for (const [name, tab] of Object.entries(tabs)) {
+      if (name === screen) {
+        tab.setAttribute("selected", "");
+      } else {
+        tab.removeAttribute("selected");
+      }
+    }
     contentEl.innerHTML = "";
     errorEl.innerHTML = "";
 
