@@ -79,7 +79,7 @@ cd frontend && npx vitest --run
 
 ## Financial Domain Model
 
-The codebase uses a typed Financial Domain Model defined in [`FinancialDomainModel.md`](FinancialDomainModel.md) as the canonical intermediate representation (fintran IR). The model is fully implemented:
+The codebase uses a typed Financial Domain Model defined in [`FinancialDomainModel.md`](docs/FinancialDomainModel.md) as the canonical intermediate representation (fintran IR). The model is fully implemented:
 
 - Immutable Pydantic types (`frozen=True`) in `backend/app/core/domain.py` and Zod schemas in `frontend/src/types/domain.ts`
 - `FinancialDocument` as the fintran IR — every reader produces one, every writer consumes one
@@ -109,7 +109,7 @@ See the [spec](.kiro/specs/financial-domain-model/) for requirements, design, an
 | [API Reference](docs/api.md) | REST endpoints, error handling, OpenAPI spec, metrics |
 | [Development Guide](docs/development.md) | Full setup, type generation, testing, CLI, pre-commit hooks |
 | [Deployment](docs/deployment.md) | Docker setup, Coolify/Hetzner deployment, production notes |
-| [Financial Domain Model](FinancialDomainModel.md) | Typed domain model reference — Pydantic types, Zod schemas, pure functions |
+| [Financial Domain Model](docs/FinancialDomainModel.md) | Typed domain model reference — Pydantic types, Zod schemas, pure functions |
 
 ## License
 

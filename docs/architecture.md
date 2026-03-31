@@ -60,7 +60,7 @@ The codebase uses a typed Financial Domain Model as the canonical intermediate r
 - `backend/app/core/adapters.py` — Bidirectional converters between legacy `TabularData` and `FinancialDocument` for incremental migration
 - `frontend/src/types/domain.ts` — Zod schemas mirroring the backend models with inferred TypeScript types
 
-Design principles: `frozen=True` on all models (no mutation), `model_copy(update={})` for modifications, pure functions in modules (not methods), tuples for collection fields. See [`FinancialDomainModel.md`](../FinancialDomainModel.md) for the full type reference.
+Design principles: `frozen=True` on all models (no mutation), `model_copy(update={})` for modifications, pure functions in modules (not methods), tuples for collection fields. See [`FinancialDomainModel.md`](FinancialDomainModel.md) for the full type reference.
 
 ### Control Table
 

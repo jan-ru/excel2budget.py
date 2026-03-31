@@ -6,7 +6,7 @@ inclusion: always
 
 This is the canonical domain model for the project. All code (backend and frontend) should align with these types and principles. Python (Pydantic) is the canonical master, TypeScript (Zod) is the frontend consumer.
 
-The full model is defined in #[[file:FinancialDomainModel.md]].
+The full model is defined in #[[file:docs/FinancialDomainModel.md]].
 
 ## Key Rules
 
